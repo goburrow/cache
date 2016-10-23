@@ -14,6 +14,7 @@ var currentTime = time.Now
 // localCache implements LoadingCache.
 type localCache struct {
 	maximumSize int
+	onRemoval   OnRemoval
 
 	cacheMu sync.RWMutex
 	cache   map[Key]*list.Element
@@ -76,6 +77,7 @@ func (c *localCache) Put(k Key, v Value) {
 		return
 	}
 
+	var remEn *entry
 	en := &entry{
 		key:        k,
 		value:      v,
@@ -94,11 +96,14 @@ func (c *localCache) Put(k Key, v Value) {
 		el = c.entries.PushFront(en)
 		c.cache[k] = el
 		if c.maximumSize > 0 && c.entries.Len() > c.maximumSize {
-			c.removeOldest()
+			remEn = c.removeOldest()
 		}
 	}
 	c.entriesMu.Unlock()
 	c.cacheMu.Unlock()
+	if c.onRemoval != nil && remEn != nil {
+		c.onRemoval(remEn.key, remEn.value)
+	}
 }
 
 // Invalidate removes the entry associated with key k.
@@ -116,29 +121,46 @@ func (c *localCache) Invalidate(k Key) {
 
 	c.entriesMu.Unlock()
 	c.cacheMu.Unlock()
+
+	if c.onRemoval != nil {
+		en := el.Value.(*entry)
+		c.onRemoval(en.key, en.value)
+	}
 }
 
 // InvalidateAll resets entries list.
 func (c *localCache) InvalidateAll() {
+	var oldCache map[Key]*list.Element
+
 	c.cacheMu.Lock()
 	c.entriesMu.Lock()
 
+	oldCache = c.cache
 	c.cache = make(map[Key]*list.Element)
 	c.entries.Init()
 
 	c.entriesMu.Unlock()
 	c.cacheMu.Unlock()
+
+	if c.onRemoval != nil {
+		for _, el := range oldCache {
+			en := el.Value.(*entry)
+			c.onRemoval(en.key, en.value)
+		}
+	}
 }
 
-// removeOldest removes oldest element in entries list.
+// removeOldest removes oldest element in entries list and returns removed entry.
 // Calling this function must be guarded by entries and cache mutex.
-func (c *localCache) removeOldest() {
+func (c *localCache) removeOldest() *entry {
 	el := c.entries.Back()
-	if el != nil {
-		c.entries.Remove(el)
-		en := el.Value.(*entry)
-		delete(c.cache, en.key)
+	if el == nil {
+		return nil
 	}
+	c.entries.Remove(el)
+	en := el.Value.(*entry)
+	delete(c.cache, en.key)
+	return en
 }
 
 // New returns a local in-memory Cache.
@@ -158,5 +180,13 @@ type Option func(c *localCache)
 func WithMaximumSize(size int) Option {
 	return func(c *localCache) {
 		c.maximumSize = size
+	}
+}
+
+// WithRemovalListener returns an Option to set cache to call onRemoval for each
+// entry evicted from the cache.
+func WithRemovalListener(onRemoval OnRemoval) Option {
+	return func(c *localCache) {
+		c.onRemoval = onRemoval
 	}
 }

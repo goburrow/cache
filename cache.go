@@ -25,3 +25,6 @@ type Cache interface {
 	// InvalidateAll discards all entries.
 	InvalidateAll()
 }
+
+// OnRemoval is a callback when an entry is evicted from cache.
+type OnRemoval func(Key, Value)

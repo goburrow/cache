@@ -66,6 +66,30 @@ func TestCacheConcurrency(t *testing.T) {
 	wg.Wait()
 }
 
+func TestRemovalListener(t *testing.T) {
+	removed := make(map[Key]int)
+	cb := func(k Key, v Value) {
+		removed[k] = v.(int)
+	}
+	c := New(WithMaximumSize(3), WithRemovalListener(cb))
+	c.Put(1, 1)
+	c.Put(2, 2)
+	c.Put(3, 3)
+	c.Put(4, 4)
+	if len(removed) != 1 || removed[1] != 1 {
+		t.Fatalf("unexpected removed entries: %+v", removed)
+	}
+
+	c.Invalidate(3)
+	if len(removed) != 2 || removed[3] != 3 {
+		t.Fatalf("unexpected removed entries: %+v", removed)
+	}
+	c.InvalidateAll()
+	if len(removed) != 4 || removed[2] != 2 || removed[4] != 4 {
+		t.Fatalf("unexpected removed entries: %+v", removed)
+	}
+}
+
 func BenchmarkCache(b *testing.B) {
 	c := New(WithMaximumSize(1024))
 	rand.Seed(time.Now().UnixNano())
