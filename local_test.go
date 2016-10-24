@@ -139,6 +139,7 @@ func TestLoadingCache(t *testing.T) {
 		wg.Done()
 	}
 	c := NewLoadingCache(loader, withInsertionListener(insFunc))
+	defer c.Close()
 	wg.Add(1)
 	v, err := c.Get(2)
 	if err != nil {
@@ -169,15 +170,18 @@ func TestLoadingCache(t *testing.T) {
 	wg.Wait()
 }
 
+func simpleLoader(k Key) (Value, error) {
+	return k, nil
+}
+
 func TestStats(t *testing.T) {
-	loader := func(k Key) (Value, error) {
-		return k, nil
-	}
 	wg := sync.WaitGroup{}
 	insFunc := func(Key, Value) {
 		wg.Done()
 	}
-	c := NewLoadingCache(loader, withInsertionListener(insFunc))
+	c := NewLoadingCache(simpleLoader, withInsertionListener(insFunc))
+	defer c.Close()
+
 	wg.Add(1)
 	_, err := c.Get("x")
 	if err != nil {
@@ -196,6 +200,41 @@ func TestStats(t *testing.T) {
 	c.Stats(&st)
 	if st.HitCount != 1 {
 		t.Fatalf("unexpected stats: %+v", st)
+	}
+}
+
+func TestExpireAfterAccess(t *testing.T) {
+	wg := sync.WaitGroup{}
+	insFunc := func(Key, Value) {
+		wg.Done()
+	}
+	now := time.Now()
+	currentTime = func() time.Time {
+		return now
+	}
+	c := NewLoadingCache(simpleLoader, WithExpireAfterAccess(1*time.Second),
+		withInsertionListener(insFunc)).(*localCache)
+	defer c.Close()
+
+	wg.Add(1)
+	_, err := c.Get("x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wg.Wait()
+	currentTime = func() time.Time {
+		return now.Add(1*time.Second - 1)
+	}
+	c.expireEntries()
+	if c.entries.Len() != 1 {
+		t.Fatalf("unexpected entries length: %d", c.entries.Len())
+	}
+	currentTime = func() time.Time {
+		return now.Add(1 * time.Second)
+	}
+	c.expireEntries()
+	if c.entries.Len() != 0 {
+		t.Fatalf("unexpected entries length: %d", c.entries.Len())
 	}
 }
 

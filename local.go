@@ -3,12 +3,19 @@ package cache
 import (
 	"container/list"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
 const (
-	defaultMaximumSize = 1<<31 - 1
-	defaultChanBufSize = 1
+	// Default maximum number of cache entries.
+	defaultMaxSize = 1<<31 - 1
+	// Default channel buffer size.
+	defaultChanSize = 1
+
+	// Maximum number of entries to be drained in a single clean up.
+	drainMax       = 16
+	drainThreshold = 64
 )
 
 // currentTime is an alias for time.Now, used for testing.
@@ -19,8 +26,8 @@ type entry struct {
 	key   Key
 	value Value
 
-	// accessed is the last accessed time
-	accessed time.Time
+	// expire is the expiration time of this entry.
+	expire time.Time
 }
 
 func getEntry(el *list.Element) *entry {
@@ -30,6 +37,8 @@ func getEntry(el *list.Element) *entry {
 // localCache is an asynchronous LRU cache.
 type localCache struct {
 	maximumSize int
+
+	expireAfterAccess time.Duration
 
 	onInsertion Func
 	onRemoval   Func
@@ -45,18 +54,21 @@ type localCache struct {
 	accessEntry chan *list.Element
 	deleteEntry chan *list.Element
 
+	// readCount is a counter of the number of reads since the last write.
+	readCount int32
+
 	closeCh chan struct{}
 }
 
 // newLocalCache returns a default localCache
 func newLocalCache() *localCache {
 	c := &localCache{
-		maximumSize: defaultMaximumSize,
+		maximumSize: defaultMaxSize,
 		cache:       make(map[Key]*list.Element),
 
-		addEntry:    make(chan *entry, defaultChanBufSize),
-		accessEntry: make(chan *list.Element, defaultChanBufSize),
-		deleteEntry: make(chan *list.Element, defaultChanBufSize),
+		addEntry:    make(chan *entry, defaultChanSize),
+		accessEntry: make(chan *list.Element, defaultChanSize),
+		deleteEntry: make(chan *list.Element, defaultChanSize),
 	}
 	c.entries.Init()
 	return c
@@ -87,6 +99,7 @@ func (c *localCache) GetIfPresent(k Key) (Value, bool) {
 		return v, true
 	}
 	c.stats.AddMissCount(1)
+	c.accessEntry <- nil
 	return nil, false
 }
 
@@ -166,22 +179,28 @@ func (c *localCache) processEntries() {
 			c.removeAll()
 			return
 		case en := <-c.addEntry:
-			en.accessed = currentTime()
 			c.add(en)
+			c.postWriteCleanup()
 		case el := <-c.accessEntry:
-			getEntry(el).accessed = currentTime()
-			c.entries.MoveToFront(el)
+			if el != nil {
+				c.touch(el)
+			}
+			c.postReadCleanup()
 		case el := <-c.deleteEntry:
 			if el == nil {
 				c.removeAll()
 			} else {
 				c.remove(el)
 			}
+			c.postReadCleanup()
 		}
 	}
 }
 
 func (c *localCache) add(en *entry) {
+	if c.expireAfterAccess > 0 {
+		en.expire = currentTime().Add(c.expireAfterAccess)
+	}
 	c.cacheMu.Lock()
 	el, ok := c.cache[en.key]
 	if ok {
@@ -205,6 +224,7 @@ func (c *localCache) add(en *entry) {
 	}
 }
 
+// removeAll remove all entries in the cache.
 func (c *localCache) removeAll() {
 	c.cacheMu.Lock()
 	oldCache := c.cache
@@ -220,6 +240,8 @@ func (c *localCache) removeAll() {
 	}
 }
 
+// remove removes the given element from the cache and entries list.
+// It also calls onRemoval callback if it is set.
 func (c *localCache) remove(el *list.Element) {
 	en := getEntry(el)
 	c.cacheMu.Lock()
@@ -229,6 +251,53 @@ func (c *localCache) remove(el *list.Element) {
 
 	if c.onRemoval != nil {
 		c.onRemoval(en.key, en.value)
+	}
+}
+
+// touch moves the given element to the top of the entries list.
+func (c *localCache) touch(el *list.Element) {
+	if c.expireAfterAccess > 0 {
+		getEntry(el).expire = currentTime().Add(c.expireAfterAccess)
+	}
+	c.entries.MoveToFront(el)
+}
+
+// postReadCleanup is run after entry access/delete event.
+func (c *localCache) postReadCleanup() {
+	if atomic.AddInt32(&c.readCount, 1) > drainThreshold {
+		atomic.StoreInt32(&c.readCount, 0)
+		c.expireEntries()
+	}
+}
+
+// postWriteCleanup is run after entry add event.
+func (c *localCache) postWriteCleanup() {
+	atomic.StoreInt32(&c.readCount, 0)
+	c.expireEntries()
+}
+
+// expireEntries removes expired entries.
+func (c *localCache) expireEntries() {
+	if c.expireAfterAccess <= 0 {
+		return
+	}
+	now := currentTime()
+	for i := drainMax; i > 0; i-- {
+		el := c.entries.Back()
+		if el == nil {
+			// List is empty
+			return
+		}
+		en := getEntry(el)
+		if en.expire.IsZero() {
+			// This should not happen
+			return
+		}
+		if now.Before(en.expire) {
+			// Expired
+			return
+		}
+		c.remove(el)
 	}
 }
 
@@ -284,6 +353,14 @@ func WithMaximumSize(size int) Option {
 func WithRemovalListener(onRemoval Func) Option {
 	return func(c *localCache) {
 		c.onRemoval = onRemoval
+	}
+}
+
+// WithExpireAfterAccess returns an option to expire a cache entry after the
+// given duration without being accessed.
+func WithExpireAfterAccess(d time.Duration) Option {
+	return func(c *localCache) {
+		c.expireAfterAccess = d
 	}
 }
 

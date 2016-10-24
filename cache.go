@@ -19,7 +19,7 @@ type Cache interface {
 	// with Key, the old one will be replaced with Value.
 	Put(Key, Value)
 
-	// Invalidate discards cached value for Key
+	// Invalidate discards cached value of the given Key.
 	Invalidate(Key)
 
 	// InvalidateAll discards all entries.
