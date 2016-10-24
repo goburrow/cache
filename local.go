@@ -6,21 +6,43 @@ import (
 	"time"
 )
 
-const defaultMaximumSize = 1<<31 - 1
+const (
+	defaultMaximumSize = 1<<31 - 1
+	defaultChanBufSize = 64
+)
 
 // currentTime is an alias for time.Now, used for testing.
 var currentTime = time.Now
 
-// localCache implements LoadingCache.
+// entry stores cached entry key and value.
+type entry struct {
+	key   Key
+	value Value
+
+	// accessed is the last accessed time
+	accessed time.Time
+}
+
+func getEntry(el *list.Element) *entry {
+	return el.Value.(*entry)
+}
+
+// localCache is an asynchronous LRU cache.
 type localCache struct {
 	maximumSize int
-	onRemoval   OnRemoval
+
+	onInsertion Func
+	onRemoval   Func
 
 	cacheMu sync.RWMutex
 	cache   map[Key]*list.Element
 
-	entriesMu sync.Mutex
-	entries   list.List
+	entries     list.List
+	addEntry    chan *entry
+	accessEntry chan *list.Element
+	deleteEntry chan *list.Element
+
+	closeCh chan struct{}
 }
 
 // newLocalCache returns a default localCache
@@ -28,17 +50,25 @@ func newLocalCache() *localCache {
 	c := &localCache{
 		maximumSize: defaultMaximumSize,
 		cache:       make(map[Key]*list.Element),
+
+		addEntry:    make(chan *entry, defaultChanBufSize),
+		accessEntry: make(chan *list.Element, defaultChanBufSize),
+		deleteEntry: make(chan *list.Element, defaultChanBufSize),
 	}
 	c.entries.Init()
 	return c
 }
 
-// entry stores cached entry key and value.
-type entry struct {
-	key   Key
-	value Value
+func (c *localCache) start() {
+	c.closeCh = make(chan struct{})
+	go c.processEntries()
+}
 
-	lastAccess time.Time
+// Close is for implementing io.Closer.
+// It always return nil error.
+func (c *localCache) Close() error {
+	close(c.closeCh)
+	return nil
 }
 
 // GetIfPresent gets cached value from entries list and updates
@@ -51,13 +81,8 @@ func (c *localCache) GetIfPresent(k Key) (Value, bool) {
 		return nil, false
 	}
 
-	// Put this element to the top
-	c.entriesMu.Lock()
-	en := el.Value.(*entry)
-	en.lastAccess = currentTime()
-	v := en.value
-	c.entries.MoveToFront(el)
-	c.entriesMu.Unlock()
+	v := getEntry(el).value
+	c.accessEntry <- el
 	return v, true
 }
 
@@ -68,98 +93,115 @@ func (c *localCache) Put(k Key, v Value) {
 	c.cacheMu.RUnlock()
 	if hit {
 		// Update list element value
-		c.entriesMu.Lock()
-		en := el.Value.(*entry)
-		en.value = v
-		en.lastAccess = currentTime()
-		c.entries.MoveToFront(el)
-		c.entriesMu.Unlock()
-		return
-	}
-
-	var remEn *entry
-	en := &entry{
-		key:        k,
-		value:      v,
-		lastAccess: currentTime(),
-	}
-	c.cacheMu.Lock()
-	c.entriesMu.Lock()
-	// Double check
-	el, hit = c.cache[k]
-	if hit {
-		// Replace list element value
-		el.Value = en
-		c.entries.MoveToFront(el)
+		getEntry(el).value = v
+		c.accessEntry <- el
 	} else {
-		// Add new element
-		el = c.entries.PushFront(en)
-		c.cache[k] = el
-		if c.maximumSize > 0 && c.entries.Len() > c.maximumSize {
-			remEn = c.removeOldest()
+		en := &entry{
+			key:   k,
+			value: v,
 		}
-	}
-	c.entriesMu.Unlock()
-	c.cacheMu.Unlock()
-	if c.onRemoval != nil && remEn != nil {
-		c.onRemoval(remEn.key, remEn.value)
+		c.addEntry <- en
 	}
 }
 
 // Invalidate removes the entry associated with key k.
 func (c *localCache) Invalidate(k Key) {
-	c.cacheMu.Lock()
+	c.cacheMu.RLock()
 	el, hit := c.cache[k]
-	if !hit {
-		c.cacheMu.Unlock()
-		return
-	}
-	c.entriesMu.Lock()
-
-	c.entries.Remove(el)
-	delete(c.cache, k)
-
-	c.entriesMu.Unlock()
-	c.cacheMu.Unlock()
-
-	if c.onRemoval != nil {
-		en := el.Value.(*entry)
-		c.onRemoval(en.key, en.value)
+	c.cacheMu.RUnlock()
+	if hit {
+		c.deleteEntry <- el
 	}
 }
 
 // InvalidateAll resets entries list.
 func (c *localCache) InvalidateAll() {
-	var oldCache map[Key]*list.Element
+	c.deleteEntry <- nil
+}
 
+func (c *localCache) processEntries() {
+	for {
+		select {
+		case <-c.closeCh:
+			c.removeAll()
+			return
+		case en := <-c.addEntry:
+			en.accessed = currentTime()
+			c.add(en)
+		case el := <-c.accessEntry:
+			getEntry(el).accessed = currentTime()
+			c.entries.MoveToFront(el)
+		case el := <-c.deleteEntry:
+			if el == nil {
+				c.removeAll()
+			} else {
+				c.remove(el)
+			}
+		}
+	}
+}
+
+func (c *localCache) add(en *entry) {
 	c.cacheMu.Lock()
-	c.entriesMu.Lock()
+	el, ok := c.cache[en.key]
+	if ok {
+		c.cacheMu.Unlock()
+		el.Value = en
+		c.entries.MoveToFront(el)
+	} else {
+		var remEn *entry
+		el = c.entries.PushFront(en)
+		c.cache[en.key] = el
+		if c.maximumSize > 0 && c.entries.Len() > c.maximumSize {
+			remEn = c.removeOldest()
+		}
+		c.cacheMu.Unlock()
+		if c.onInsertion != nil {
+			c.onInsertion(en.key, en.value)
+		}
+		if c.onRemoval != nil && remEn != nil {
+			c.onRemoval(remEn.key, remEn.value)
+		}
+	}
+}
 
-	oldCache = c.cache
+func (c *localCache) removeAll() {
+	c.cacheMu.Lock()
+	oldCache := c.cache
 	c.cache = make(map[Key]*list.Element)
-	c.entries.Init()
-
-	c.entriesMu.Unlock()
 	c.cacheMu.Unlock()
+	c.entries.Init()
 
 	if c.onRemoval != nil {
 		for _, el := range oldCache {
-			en := el.Value.(*entry)
+			en := getEntry(el)
 			c.onRemoval(en.key, en.value)
 		}
 	}
 }
 
-// removeOldest removes oldest element in entries list and returns removed entry.
+func (c *localCache) remove(el *list.Element) {
+	en := getEntry(el)
+	c.cacheMu.Lock()
+	delete(c.cache, en.key)
+	c.cacheMu.Unlock()
+	c.entries.Remove(el)
+
+	if c.onRemoval != nil {
+		c.onRemoval(en.key, en.value)
+	}
+}
+
+// removeOldest removes last element in entries list and returns removed entry.
 // Calling this function must be guarded by entries and cache mutex.
 func (c *localCache) removeOldest() *entry {
 	el := c.entries.Back()
 	if el == nil {
 		return nil
 	}
-	c.entries.Remove(el)
-	en := el.Value.(*entry)
+	en := getEntry(el)
 	delete(c.cache, en.key)
+	c.entries.Remove(el)
 	return en
 }
 
@@ -169,6 +211,7 @@ func New(options ...Option) Cache {
 	for _, opt := range options {
 		opt(c)
 	}
+	c.start()
 	return c
 }
 
@@ -185,8 +228,15 @@ func WithMaximumSize(size int) Option {
 
 // WithRemovalListener returns an Option to set cache to call onRemoval for each
 // entry evicted from the cache.
-func WithRemovalListener(onRemoval OnRemoval) Option {
+func WithRemovalListener(onRemoval Func) Option {
 	return func(c *localCache) {
 		c.onRemoval = onRemoval
+	}
+}
+
+// withInsertionListener is used for testing.
+func withInsertionListener(onInsertion Func) Option {
+	return func(c *localCache) {
+		c.onInsertion = onInsertion
 	}
 }

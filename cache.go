@@ -24,7 +24,24 @@ type Cache interface {
 
 	// InvalidateAll discards all entries.
 	InvalidateAll()
+
+	// Close implements io.Closer for cleaning up all resources.
+	// Once cache is closed, it should no longer be used.
+	Close() error
 }
 
-// OnRemoval is a callback when an entry is evicted from cache.
-type OnRemoval func(Key, Value)
+// Func is a generic callback for entry events in the cache.
+type Func func(Key, Value)
+
+// LoadingCache is a cache with values are loaded automatically and stored
+// in the cache until either evicted or manually invalidated.
+type LoadingCache interface {
+	Cache
+
+	// Get returns value associated with Key or call underlying LoaderFunc
+	// to load value if it is not present.
+	Get(Key) (Value, error)
+}
+
+// LoaderFunc retrieves the value corresponding to given Key.
+type LoaderFunc func(Key) (Value, error)

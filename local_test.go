@@ -16,10 +16,17 @@ func TestCache(t *testing.T) {
 		{"2", 2},
 	}
 
-	c := New()
+	wg := sync.WaitGroup{}
+	c := New(withInsertionListener(func(Key, Value) {
+		wg.Done()
+	}))
+	defer c.Close()
+
+	wg.Add(len(data))
 	for _, d := range data {
 		c.Put(d.k, d.v)
 	}
+	wg.Wait()
 
 	for _, d := range data {
 		v, ok := c.GetIfPresent(d.k)
@@ -30,68 +37,96 @@ func TestCache(t *testing.T) {
 }
 
 func TestCacheMaximumSize(t *testing.T) {
-	max := 5
-	c := New(WithMaximumSize(5)).(*localCache)
+	max := 10
+	wg := sync.WaitGroup{}
+	c := New(WithMaximumSize(max), withInsertionListener(func(Key, Value) {
+		wg.Done()
+	})).(*localCache)
+	defer c.Close()
 
+	wg.Add(max)
 	for i := 0; i < max; i++ {
 		c.Put(i, i)
 	}
+	wg.Wait()
+	c.onInsertion = nil
 	for i := 0; i < 2*max; i++ {
 		k := rand.Intn(2 * max)
 		c.Put(k, k)
-		if len(c.cache) != max || c.entries.Len() != max {
+		time.Sleep(time.Duration(i+1) * time.Millisecond)
+		if len(c.cache) > max || c.entries.Len() > max {
 			t.Fatalf("unexpected cache size: %v, %v", len(c.cache), c.entries.Len())
 		}
 	}
 }
 
-func TestCacheConcurrency(t *testing.T) {
-	max := 128
-	c := New()
-
-	wg := sync.WaitGroup{}
-	wg.Add(max)
-	for i := 0; i < max; i++ {
-		go func(i int) {
-			defer wg.Done()
-			time.Sleep(time.Duration(rand.Intn(10))*time.Millisecond + 1)
-			k := rand.Int63()
-			c.Put(k, k)
-			v, ok := c.GetIfPresent(k)
-			if !ok || v.(int64) != k {
-				t.Errorf("unexpected get: %v (%v)", v, ok)
-			}
-		}(i)
-	}
-	wg.Wait()
-}
-
 func TestRemovalListener(t *testing.T) {
 	removed := make(map[Key]int)
-	cb := func(k Key, v Value) {
+	wg := sync.WaitGroup{}
+	remFunc := func(k Key, v Value) {
 		removed[k] = v.(int)
+		wg.Done()
 	}
-	c := New(WithMaximumSize(3), WithRemovalListener(cb))
-	c.Put(1, 1)
-	c.Put(2, 2)
-	c.Put(3, 3)
-	c.Put(4, 4)
+	insFunc := func(Key, Value) {
+		wg.Done()
+	}
+	max := 3
+	c := New(WithMaximumSize(max), WithRemovalListener(remFunc),
+		withInsertionListener(insFunc))
+	defer c.Close()
+
+	wg.Add(max + 2)
+	for i := 1; i < max+2; i++ {
+		c.Put(i, i)
+	}
+	wg.Wait()
+
 	if len(removed) != 1 || removed[1] != 1 {
 		t.Fatalf("unexpected removed entries: %+v", removed)
 	}
 
+	wg.Add(1)
 	c.Invalidate(3)
+	wg.Wait()
 	if len(removed) != 2 || removed[3] != 3 {
 		t.Fatalf("unexpected removed entries: %+v", removed)
 	}
+	wg.Add(2)
 	c.InvalidateAll()
+	wg.Wait()
 	if len(removed) != 4 || removed[2] != 2 || removed[4] != 4 {
 		t.Fatalf("unexpected removed entries: %+v", removed)
 	}
 }
 
+func TestClose(t *testing.T) {
+	removed := 0
+	wg := sync.WaitGroup{}
+	remFunc := func(Key, Value) {
+		removed++
+		wg.Done()
+	}
+	insFunc := func(Key, Value) {
+		wg.Done()
+	}
+	c := New(WithRemovalListener(remFunc), withInsertionListener(insFunc))
+	n := 10
+	wg.Add(n)
+	for i := 0; i < n; i++ {
+		c.Put(i, i)
+	}
+	wg.Wait()
+	wg.Add(n)
+	c.Close()
+	wg.Wait()
+	if removed != n {
+		t.Fatalf("unexpected removed: %d", removed)
+	}
+}
+
 func BenchmarkCache(b *testing.B) {
 	c := New(WithMaximumSize(1024))
+	defer c.Close()
 	rand.Seed(time.Now().UnixNano())
 
 	b.ResetTimer()
