@@ -25,6 +25,9 @@ type Cache interface {
 	// InvalidateAll discards all entries.
 	InvalidateAll()
 
+	// Stats copies cache statistics to given Stats pointer.
+	Stats(*Stats)
+
 	// Close implements io.Closer for cleaning up all resources.
 	// Once cache is closed, it should no longer be used.
 	Close() error

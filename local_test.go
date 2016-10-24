@@ -169,6 +169,36 @@ func TestLoadingCache(t *testing.T) {
 	wg.Wait()
 }
 
+func TestStats(t *testing.T) {
+	loader := func(k Key) (Value, error) {
+		return k, nil
+	}
+	wg := sync.WaitGroup{}
+	insFunc := func(Key, Value) {
+		wg.Done()
+	}
+	c := NewLoadingCache(loader, withInsertionListener(insFunc))
+	wg.Add(1)
+	_, err := c.Get("x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var st Stats
+	c.Stats(&st)
+	if st.MissCount != 1 {
+		t.Fatalf("unexpected stats: %+v", st)
+	}
+	wg.Wait()
+	_, err = c.Get("x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Stats(&st)
+	if st.HitCount != 1 {
+		t.Fatalf("unexpected stats: %+v", st)
+	}
+}
+
 func BenchmarkCache(b *testing.B) {
 	c := New(WithMaximumSize(1024))
 	defer c.Close()

@@ -8,7 +8,7 @@ import (
 
 const (
 	defaultMaximumSize = 1<<31 - 1
-	defaultChanBufSize = 64
+	defaultChanBufSize = 1
 )
 
 // currentTime is an alias for time.Now, used for testing.
@@ -35,6 +35,7 @@ type localCache struct {
 	onRemoval   Func
 
 	loader LoaderFunc
+	stats  Stats
 
 	cacheMu sync.RWMutex
 	cache   map[Key]*list.Element
@@ -80,10 +81,12 @@ func (c *localCache) GetIfPresent(k Key) (Value, bool) {
 	el, hit := c.cache[k]
 	c.cacheMu.RUnlock()
 	if hit {
+		c.stats.AddHitCount(1)
 		v := getEntry(el).value
 		c.accessEntry <- el
 		return v, true
 	}
+	c.stats.AddMissCount(1)
 	return nil, false
 }
 
@@ -128,23 +131,32 @@ func (c *localCache) Get(k Key) (Value, error) {
 	el, hit := c.cache[k]
 	c.cacheMu.RUnlock()
 	if hit {
+		c.stats.AddHitCount(1)
 		v := getEntry(el).value
 		c.accessEntry <- el
 		return v, nil
 	}
+	c.stats.AddMissCount(1)
 	if c.loader == nil {
 		panic("loader must be set")
 	}
 	v, err := c.loader(k)
 	if err != nil {
+		c.stats.AddLoadErrorCount(1)
 		return nil, err
 	}
+	c.stats.AddLoadSuccessCount(1)
 	en := &entry{
 		key:   k,
 		value: v,
 	}
 	c.addEntry <- en
 	return v, nil
+}
+
+// Stats copies cache stats to t.
+func (c *localCache) Stats(t *Stats) {
+	c.stats.Copy(t)
 }
 
 func (c *localCache) processEntries() {
@@ -230,6 +242,7 @@ func (c *localCache) removeOldest() *entry {
 	en := getEntry(el)
 	delete(c.cache, en.key)
 	c.entries.Remove(el)
+	c.stats.AddEvictionCount(1)
 	return en
 }
 
