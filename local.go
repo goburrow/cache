@@ -34,6 +34,8 @@ type localCache struct {
 	onInsertion Func
 	onRemoval   Func
 
+	loader LoaderFunc
+
 	cacheMu sync.RWMutex
 	cache   map[Key]*list.Element
 
@@ -77,13 +79,12 @@ func (c *localCache) GetIfPresent(k Key) (Value, bool) {
 	c.cacheMu.RLock()
 	el, hit := c.cache[k]
 	c.cacheMu.RUnlock()
-	if !hit {
-		return nil, false
+	if hit {
+		v := getEntry(el).value
+		c.accessEntry <- el
+		return v, true
 	}
-
-	v := getEntry(el).value
-	c.accessEntry <- el
-	return v, true
+	return nil, false
 }
 
 // Put adds new entry to entries list.
@@ -117,6 +118,33 @@ func (c *localCache) Invalidate(k Key) {
 // InvalidateAll resets entries list.
 func (c *localCache) InvalidateAll() {
 	c.deleteEntry <- nil
+}
+
+// Get returns value associated with k or call underlying loader to retrieve value
+// if it is not in the cache. The returned value is only cached when loader returns
+// nil error.
+func (c *localCache) Get(k Key) (Value, error) {
+	c.cacheMu.RLock()
+	el, hit := c.cache[k]
+	c.cacheMu.RUnlock()
+	if hit {
+		v := getEntry(el).value
+		c.accessEntry <- el
+		return v, nil
+	}
+	if c.loader == nil {
+		panic("loader must be set")
+	}
+	v, err := c.loader(k)
+	if err != nil {
+		return nil, err
+	}
+	en := &entry{
+		key:   k,
+		value: v,
+	}
+	c.addEntry <- en
+	return v, nil
 }
 
 func (c *localCache) processEntries() {
@@ -208,6 +236,18 @@ func (c *localCache) removeOldest() *entry {
 // New returns a local in-memory Cache.
 func New(options ...Option) Cache {
 	c := newLocalCache()
+	for _, opt := range options {
+		opt(c)
+	}
+	c.start()
+	return c
+}
+
+// NewLoadingCache returns a new LoadingCache with given loader function
+// and cache options.
+func NewLoadingCache(loader LoaderFunc, options ...Option) LoadingCache {
+	c := newLocalCache()
+	c.loader = loader
 	for _, opt := range options {
 		opt(c)
 	}

@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"errors"
 	"math/rand"
 	"sync"
 	"testing"
@@ -36,7 +37,7 @@ func TestCache(t *testing.T) {
 	}
 }
 
-func TestCacheMaximumSize(t *testing.T) {
+func TestMaximumSize(t *testing.T) {
 	max := 10
 	wg := sync.WaitGroup{}
 	c := New(WithMaximumSize(max), withInsertionListener(func(Key, Value) {
@@ -122,6 +123,50 @@ func TestClose(t *testing.T) {
 	if removed != n {
 		t.Fatalf("unexpected removed: %d", removed)
 	}
+}
+
+func TestLoadingCache(t *testing.T) {
+	loadCount := 0
+	loader := func(k Key) (Value, error) {
+		loadCount++
+		if k.(int)%2 != 0 {
+			return nil, errors.New("odd")
+		}
+		return k, nil
+	}
+	wg := sync.WaitGroup{}
+	insFunc := func(Key, Value) {
+		wg.Done()
+	}
+	c := NewLoadingCache(loader, withInsertionListener(insFunc))
+	wg.Add(1)
+	v, err := c.Get(2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.(int) != 2 {
+		t.Fatalf("unexpected get: %v", v)
+	}
+	if loadCount != 1 {
+		t.Fatalf("unexpected load count: %v", loadCount)
+	}
+	wg.Wait()
+	v, err = c.Get(2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.(int) != 2 {
+		t.Fatalf("unexpected get: %v", v)
+	}
+	if loadCount != 1 {
+		t.Fatalf("unexpected load count: %v", loadCount)
+	}
+	v, err = c.Get(1)
+	if err == nil || err.Error() != "odd" {
+		t.Fatalf("expected error: %v", err)
+	}
+	// Should not insert
+	wg.Wait()
 }
 
 func BenchmarkCache(b *testing.B) {
