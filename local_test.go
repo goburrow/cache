@@ -223,17 +223,68 @@ func TestExpireAfterAccess(t *testing.T) {
 	}
 	wg.Wait()
 	currentTime = func() time.Time {
-		return now.Add(1*time.Second - 1)
+		return now.Add(1 * time.Second)
 	}
 	c.expireEntries()
 	if c.entries.Len() != 1 {
 		t.Fatalf("unexpected entries length: %d", c.entries.Len())
 	}
 	currentTime = func() time.Time {
-		return now.Add(1 * time.Second)
+		return now.Add(1*time.Second + 1)
 	}
 	c.expireEntries()
 	if c.entries.Len() != 0 {
 		t.Fatalf("unexpected entries length: %d", c.entries.Len())
+	}
+}
+
+func TestRefreshAfterWrite(t *testing.T) {
+	loadCount := 0
+	loader := func(k Key) (Value, error) {
+		loadCount++
+		return loadCount, nil
+	}
+	wg := sync.WaitGroup{}
+	insFunc := func(Key, Value) {
+		wg.Done()
+	}
+	now := time.Now()
+	currentTime = func() time.Time {
+		return now
+	}
+	c := NewLoadingCache(loader, WithRefreshAfterWrite(1*time.Second),
+		withInsertionListener(insFunc))
+	defer c.Close()
+
+	wg.Add(1)
+	v, err := c.Get("refresh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wg.Wait()
+	if v.(int) != 1 || loadCount != 1 {
+		t.Fatalf("unexpected load count: %v, %v", v, loadCount)
+	}
+
+	currentTime = func() time.Time {
+		return now.Add(1 * time.Second)
+	}
+	v, err = c.Get("refresh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.(int) != 1 || loadCount != 1 {
+		t.Fatalf("unexpected load count: %v, %v", v, loadCount)
+	}
+
+	currentTime = func() time.Time {
+		return now.Add(1*time.Second + 1)
+	}
+	v, err = c.Get("refresh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.(int) != 2 || loadCount != 2 {
+		t.Fatalf("unexpected load count: %v, %v", v, loadCount)
 	}
 }
