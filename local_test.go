@@ -237,20 +237,3 @@ func TestExpireAfterAccess(t *testing.T) {
 		t.Fatalf("unexpected entries length: %d", c.entries.Len())
 	}
 }
-
-func BenchmarkCache(b *testing.B) {
-	c := New(WithMaximumSize(1024))
-	defer c.Close()
-	rand.Seed(time.Now().UnixNano())
-
-	b.ResetTimer()
-	b.ReportAllocs()
-	b.RunParallel(func(pb *testing.PB) {
-		for pb.Next() {
-			k := rand.Int63()
-			c.Put(k, b)
-			k = rand.Int63()
-			_, _ = c.GetIfPresent(k)
-		}
-	})
-}

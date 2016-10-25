@@ -10,9 +10,8 @@ import (
 const (
 	// Default maximum number of cache entries.
 	defaultMaxSize = 1<<31 - 1
-	// Default channel buffer size.
-	defaultChanSize = 1
-
+	// Buffer size of entry channels
+	chanBufSize = 1
 	// Maximum number of entries to be drained in a single clean up.
 	drainMax       = 16
 	drainThreshold = 64
@@ -26,12 +25,16 @@ type entry struct {
 	key   Key
 	value Value
 
-	// expire is the expiration time of this entry.
-	expire time.Time
+	// accessed is the last time this entry was accessed.
+	accessed time.Time
 }
 
 func getEntry(el *list.Element) *entry {
 	return el.Value.(*entry)
+}
+
+func setEntry(el *list.Element, en *entry) {
+	el.Value = en
 }
 
 // localCache is an asynchronous LRU cache.
@@ -66,9 +69,9 @@ func newLocalCache() *localCache {
 		maximumSize: defaultMaxSize,
 		cache:       make(map[Key]*list.Element),
 
-		addEntry:    make(chan *entry, defaultChanSize),
-		accessEntry: make(chan *list.Element, defaultChanSize),
-		deleteEntry: make(chan *list.Element, defaultChanSize),
+		addEntry:    make(chan *entry, chanBufSize),
+		accessEntry: make(chan *list.Element, chanBufSize),
+		deleteEntry: make(chan *list.Element, chanBufSize),
 	}
 	c.entries.Init()
 	return c
@@ -198,28 +201,41 @@ func (c *localCache) processEntries() {
 }
 
 func (c *localCache) add(en *entry) {
-	if c.expireAfterAccess > 0 {
-		en.expire = currentTime().Add(c.expireAfterAccess)
-	}
+	en.accessed = currentTime()
 	c.cacheMu.Lock()
 	el, ok := c.cache[en.key]
 	if ok {
 		c.cacheMu.Unlock()
-		el.Value = en
+		setEntry(el, en)
 		c.entries.MoveToFront(el)
 	} else {
 		var remEn *entry
-		el = c.entries.PushFront(en)
-		c.cache[en.key] = el
-		if c.maximumSize > 0 && c.entries.Len() > c.maximumSize {
-			remEn = c.removeOldest()
+		if c.maximumSize > 0 && c.entries.Len() >= c.maximumSize {
+			// Swap with the oldest one
+			el = c.entries.Back()
+			if el == nil {
+				// This can not happen
+				el = c.entries.PushFront(en)
+			} else {
+				remEn = getEntry(el)
+				delete(c.cache, remEn.key)
+				setEntry(el, en)
+				c.entries.MoveToFront(el)
+			}
+		} else {
+			el = c.entries.PushFront(en)
 		}
+		c.cache[en.key] = el
 		c.cacheMu.Unlock()
 		if c.onInsertion != nil {
 			c.onInsertion(en.key, en.value)
 		}
-		if c.onRemoval != nil && remEn != nil {
-			c.onRemoval(remEn.key, remEn.value)
+		if remEn != nil {
+			// An entry has been evicted
+			c.stats.AddEvictionCount(1)
+			if c.onRemoval != nil {
+				c.onRemoval(remEn.key, remEn.value)
+			}
 		}
 	}
 }
@@ -256,9 +272,7 @@ func (c *localCache) remove(el *list.Element) {
 
 // touch moves the given element to the top of the entries list.
 func (c *localCache) touch(el *list.Element) {
-	if c.expireAfterAccess > 0 {
-		getEntry(el).expire = currentTime().Add(c.expireAfterAccess)
-	}
+	getEntry(el).accessed = currentTime()
 	c.entries.MoveToFront(el)
 }
 
@@ -281,38 +295,21 @@ func (c *localCache) expireEntries() {
 	if c.expireAfterAccess <= 0 {
 		return
 	}
-	now := currentTime()
+	expire := currentTime().Add(-c.expireAfterAccess)
 	for i := drainMax; i > 0; i-- {
 		el := c.entries.Back()
 		if el == nil {
 			// List is empty
-			return
+			break
 		}
 		en := getEntry(el)
-		if en.expire.IsZero() {
-			// This should not happen
-			return
-		}
-		if now.Before(en.expire) {
-			// Expired
-			return
+		if expire.Before(en.accessed) {
+			// Can break since the entries list is sorted by access time
+			break
 		}
 		c.remove(el)
+		c.stats.AddEvictionCount(1)
 	}
-}
-
-// removeOldest removes last element in entries list and returns removed entry.
-// Calling this function must be guarded by entries and cache mutex.
-func (c *localCache) removeOldest() *entry {
-	el := c.entries.Back()
-	if el == nil {
-		return nil
-	}
-	en := getEntry(el)
-	delete(c.cache, en.key)
-	c.entries.Remove(el)
-	c.stats.AddEvictionCount(1)
-	return en
 }
 
 // New returns a local in-memory Cache.
