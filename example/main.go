@@ -23,8 +23,8 @@ func report(c cache.Cache) {
 	hitPerc := float64(st.HitCount) / float64(total) * 100.0
 	missPerc := float64(st.MissCount) / float64(total) * 100.0
 
-	fmt.Printf("total: %d, hit: %d (%.2f%%), miss: %d (%.2f%%), eviction: %d\n",
-		total, st.HitCount, hitPerc, st.MissCount, missPerc, st.EvictionCount)
+	fmt.Printf("total: %d, hit: %d (%.2f%%), miss: %d (%.2f%%), eviction: %d, load: %s\n",
+		total, st.HitCount, hitPerc, st.MissCount, missPerc, st.EvictionCount, st.TotalLoadTime)
 }
 
 func main() {

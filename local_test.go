@@ -189,7 +189,7 @@ func TestStats(t *testing.T) {
 	}
 	var st Stats
 	c.Stats(&st)
-	if st.MissCount != 1 {
+	if st.MissCount != 1 || st.LoadSuccessCount != 1 || st.TotalLoadTime <= 0 {
 		t.Fatalf("unexpected stats: %+v", st)
 	}
 	wg.Wait()

@@ -1,6 +1,9 @@
 package cache
 
-import "sync/atomic"
+import (
+	"sync/atomic"
+	"time"
+)
 
 // Stats is statistics about performance of a cache.
 type Stats struct {
@@ -8,39 +11,69 @@ type Stats struct {
 	MissCount        uint64
 	LoadSuccessCount uint64
 	LoadErrorCount   uint64
+	TotalLoadTime    time.Duration
 	EvictionCount    uint64
 }
 
-// AddHitCount increases HitCount atomically.
-func (s *Stats) AddHitCount(delta uint64) {
-	atomic.AddUint64(&s.HitCount, delta)
+// StatsCounter accumulates statistics of a cache.
+type StatsCounter interface {
+	// RecordHits records cache hits.
+	RecordHits(count uint64)
+
+	// RecordMisses records cache misses.
+	RecordMisses(count uint64)
+
+	// RecordLoadSuccess records successful load of a new entry.
+	RecordLoadSuccess(loadTime time.Duration)
+
+	// RecordLoadError records failed load of a new entry.
+	RecordLoadError(loadTime time.Duration)
+
+	// RecordEviction records eviction of an entry from the cache.
+	RecordEviction()
+
+	// Snapshot writes snapshot of this counter values to the given Stats pointer.
+	Snapshot(*Stats)
 }
 
-// AddMissCount increases MissCount atomically.
-func (s *Stats) AddMissCount(delta uint64) {
-	atomic.AddUint64(&s.MissCount, delta)
+// statsCounter is a simple implementation of StatsCounter.
+type statsCounter struct {
+	Stats
 }
 
-// AddLoadSuccessCount increases LoadSuccessCount atomically.
-func (s *Stats) AddLoadSuccessCount(delta uint64) {
-	atomic.AddUint64(&s.LoadSuccessCount, delta)
+// RecordHits increases HitCount atomically.
+func (s *statsCounter) RecordHits(count uint64) {
+	atomic.AddUint64(&s.Stats.HitCount, count)
 }
 
-// AddLoadErrorCount increases LoadErrorCount atomically.
-func (s *Stats) AddLoadErrorCount(delta uint64) {
-	atomic.AddUint64(&s.LoadErrorCount, delta)
+// RecordMisses increases MissCount atomically.
+func (s *statsCounter) RecordMisses(count uint64) {
+	atomic.AddUint64(&s.Stats.MissCount, count)
 }
 
-// AddEvictionCount increases EvictionCount atomically.
-func (s *Stats) AddEvictionCount(delta uint64) {
-	atomic.AddUint64(&s.EvictionCount, delta)
+// RecordLoadSuccess increases LoadSuccessCount atomically.
+func (s *statsCounter) RecordLoadSuccess(loadTime time.Duration) {
+	atomic.AddUint64(&s.Stats.LoadSuccessCount, 1)
+	atomic.AddInt64((*int64)(&s.Stats.TotalLoadTime), int64(loadTime))
 }
 
-// Copy copies current stats to t.
-func (s *Stats) Copy(t *Stats) {
+// RecordLoadError increases LoadErrorCount atomically.
+func (s *statsCounter) RecordLoadError(loadTime time.Duration) {
+	atomic.AddUint64(&s.Stats.LoadErrorCount, 1)
+	atomic.AddInt64((*int64)(&s.Stats.TotalLoadTime), int64(loadTime))
+}
+
+// RecordEviction increases EvictionCount atomically.
+func (s *statsCounter) RecordEviction() {
+	atomic.AddUint64(&s.Stats.EvictionCount, 1)
+}
+
+// Snapshot copies current stats to t.
+func (s *statsCounter) Snapshot(t *Stats) {
 	t.HitCount = atomic.LoadUint64(&s.HitCount)
 	t.MissCount = atomic.LoadUint64(&s.MissCount)
 	t.LoadSuccessCount = atomic.LoadUint64(&s.LoadSuccessCount)
 	t.LoadErrorCount = atomic.LoadUint64(&s.LoadErrorCount)
+	t.TotalLoadTime = time.Duration(atomic.LoadInt64((*int64)(&s.TotalLoadTime)))
 	t.EvictionCount = atomic.LoadUint64(&s.EvictionCount)
 }

@@ -50,7 +50,7 @@ type localCache struct {
 	onRemoval   Func
 
 	loader LoaderFunc
-	stats  Stats
+	stats  StatsCounter
 
 	cacheMu sync.RWMutex
 	cache   map[Key]*list.Element
@@ -70,6 +70,7 @@ type localCache struct {
 func newLocalCache() *localCache {
 	c := &localCache{
 		maximumSize: defaultMaxSize,
+		stats:       &statsCounter{},
 		cache:       make(map[Key]*list.Element),
 
 		addEntry:    make(chan *entry, chanBufSize),
@@ -100,12 +101,12 @@ func (c *localCache) GetIfPresent(k Key) (Value, bool) {
 	c.cacheMu.RUnlock()
 	if !hit {
 		c.accessEntry <- nil
-		c.stats.AddMissCount(1)
+		c.stats.RecordMisses(1)
 		return nil, false
 	}
 	v := getEntry(el).value
 	c.accessEntry <- el
-	c.stats.AddHitCount(1)
+	c.stats.RecordHits(1)
 	return v, true
 }
 
@@ -150,10 +151,10 @@ func (c *localCache) Get(k Key) (Value, error) {
 	el, hit := c.cache[k]
 	c.cacheMu.RUnlock()
 	if !hit {
-		c.stats.AddMissCount(1)
+		c.stats.RecordMisses(1)
 		return c.load(k)
 	}
-	c.stats.AddHitCount(1)
+	c.stats.RecordHits(1)
 	en := getEntry(el)
 	// Check if this entry needs to be refreshed
 	if c.refreshAfterWrite > 0 && en.updated.Before(currentTime().Add(-c.refreshAfterWrite)) {
@@ -166,7 +167,7 @@ func (c *localCache) Get(k Key) (Value, error) {
 
 // Stats copies cache stats to t.
 func (c *localCache) Stats(t *Stats) {
-	c.stats.Copy(t)
+	c.stats.Snapshot(t)
 }
 
 func (c *localCache) processEntries() {
@@ -227,7 +228,7 @@ func (c *localCache) add(en *entry) {
 		}
 		if remEn != nil {
 			// An entry has been evicted
-			c.stats.AddEvictionCount(1)
+			c.stats.RecordEviction()
 			if c.onRemoval != nil {
 				c.onRemoval(remEn.key, remEn.value)
 			}
@@ -277,9 +278,11 @@ func (c *localCache) load(k Key) (Value, error) {
 	if c.loader == nil {
 		panic("loader must be set")
 	}
+	start := currentTime()
 	v, err := c.loader(k)
+	loadTime := currentTime().Sub(start)
 	if err != nil {
-		c.stats.AddLoadErrorCount(1)
+		c.stats.RecordLoadError(loadTime)
 		return nil, err
 	}
 	en := &entry{
@@ -287,7 +290,7 @@ func (c *localCache) load(k Key) (Value, error) {
 		value: v,
 	}
 	c.addEntry <- en
-	c.stats.AddLoadSuccessCount(1)
+	c.stats.RecordLoadSuccess(loadTime)
 	return v, nil
 }
 
@@ -299,14 +302,16 @@ func (c *localCache) refresh(en *entry) Value {
 	if c.loader == nil {
 		panic("loader must be set")
 	}
+	start := currentTime()
 	newV, err := c.loader(en.key)
+	loadTime := currentTime().Sub(start)
 	if err != nil {
-		c.stats.AddLoadErrorCount(1)
+		c.stats.RecordLoadError(loadTime)
 		return en.value
 	}
 	en.value = newV
 	c.addEntry <- en
-	c.stats.AddLoadSuccessCount(1)
+	c.stats.RecordLoadSuccess(loadTime)
 	return newV
 }
 
@@ -342,7 +347,7 @@ func (c *localCache) expireEntries() {
 			break
 		}
 		c.remove(el)
-		c.stats.AddEvictionCount(1)
+		c.stats.RecordEviction()
 	}
 }
 
@@ -400,6 +405,13 @@ func WithExpireAfterAccess(d time.Duration) Option {
 func WithRefreshAfterWrite(d time.Duration) Option {
 	return func(c *localCache) {
 		c.refreshAfterWrite = d
+	}
+}
+
+// WithStatsCounter returns an option which overrides default cache stats counter.
+func WithStatsCounter(st StatsCounter) Option {
+	return func(c *localCache) {
+		c.stats = st
 	}
 }
 
