@@ -34,4 +34,20 @@ func TestStatsCounter(t *testing.T) {
 	if st.EvictionCount != 1 {
 		t.Fatalf("unexpected eviction count: %v", st)
 	}
+
+	if st.RequestCount() != 5 {
+		t.Fatalf("unexpected request count: %v", st.RequestCount())
+	}
+	if st.HitRate() != 0.6 {
+		t.Fatalf("unexpected hit rate: %v", st.HitRate())
+	}
+	if st.MissRate() != 0.4 {
+		t.Fatalf("unexpected miss rate: %v", st.MissRate())
+	}
+	if st.LoadErrorRate() != 0.5 {
+		t.Fatalf("unexpected error rate: %v", st.LoadErrorRate())
+	}
+	if st.AverageLoadPenalty() != (1500 * time.Millisecond) {
+		t.Fatalf("unexpected load penalty: %v", st.AverageLoadPenalty())
+	}
 }

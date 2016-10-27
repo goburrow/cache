@@ -6,27 +6,31 @@ import (
 	"time"
 )
 
+const (
+	distinctKeys    = 4096
+	reportThreshold = 10000
+)
+
+func init() {
+	rand.Seed(time.Now().UnixNano())
+}
+
 func BenchmarkCache(b *testing.B) {
-	maxSize := 4096
-	distinctKeys := 4096
-	benchmarkCache(b, maxSize, distinctKeys)
+	c := New(WithMaximumSize(distinctKeys))
+	benchmarkCache(b, c)
 }
 
 func BenchmarkCacheHalf(b *testing.B) {
-	maxSize := 2048
-	distinctKeys := 4096
-	benchmarkCache(b, maxSize, distinctKeys)
+	c := New(WithMaximumSize(distinctKeys / 2))
+	benchmarkCache(b, c)
 }
 
-func benchmarkCache(b *testing.B, maxSize, distinctKeys int) {
-	c := New(WithMaximumSize(maxSize))
+func benchmarkCache(b *testing.B, c Cache) {
 	defer c.Close()
-	rand.Seed(time.Now().UnixNano())
-
 	b.ResetTimer()
 	b.ReportAllocs()
 
-	if b.N > 100 {
+	if b.N > reportThreshold {
 		defer printStats(b, c, time.Now())
 	}
 	b.RunParallel(func(pb *testing.PB) {
@@ -45,10 +49,7 @@ func printStats(b *testing.B, c Cache, start time.Time) {
 	var st Stats
 	c.Stats(&st)
 
-	total := st.HitCount + st.MissCount
-	hitPerc := float64(st.HitCount) / float64(total) * 100.0
-	missPerc := float64(st.MissCount) / float64(total) * 100.0
-
-	b.Logf("total: %d (%v), hit: %d (%.2f%%), miss: %d (%.2f%%), eviction: %d",
-		total, dur, st.HitCount, hitPerc, st.MissCount, missPerc, st.EvictionCount)
+	b.Logf("total: %d (%s), hits: %d (%.2f%%), misses: %d (%.2f%%), evictions: %d, load: %s (%s)\n",
+		st.RequestCount(), dur, st.HitCount, st.HitRate()*100.0, st.MissCount, st.MissRate()*100.0,
+		st.EvictionCount, st.TotalLoadTime, st.AverageLoadPenalty())
 }

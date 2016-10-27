@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"fmt"
 	"sync/atomic"
 	"time"
 )
@@ -13,6 +14,53 @@ type Stats struct {
 	LoadErrorCount   uint64
 	TotalLoadTime    time.Duration
 	EvictionCount    uint64
+}
+
+// RequestCount returns a total of HitCount and MissCount.
+func (s *Stats) RequestCount() uint64 {
+	return s.HitCount + s.MissCount
+}
+
+// HitRate returns the ratio of cache requests which were hits.
+func (s *Stats) HitRate() float64 {
+	total := s.RequestCount()
+	if total == 0 {
+		return 1.0
+	}
+	return float64(s.HitCount) / float64(total)
+}
+
+// MissRate returns the ratio of cache requests which were misses.
+func (s *Stats) MissRate() float64 {
+	total := s.RequestCount()
+	if total == 0 {
+		return 0.0
+	}
+	return float64(s.MissCount) / float64(total)
+}
+
+// LoadErrorRate returns the ratio of cache loading attempts which returned errors.
+func (s *Stats) LoadErrorRate() float64 {
+	total := s.LoadSuccessCount + s.LoadErrorCount
+	if total == 0 {
+		return 0.0
+	}
+	return float64(s.LoadErrorCount) / float64(total)
+}
+
+// AverageLoadPenalty returns the average time spent loading new values.
+func (s *Stats) AverageLoadPenalty() time.Duration {
+	total := s.LoadSuccessCount + s.LoadErrorCount
+	if total == 0 {
+		return 0.0
+	}
+	return s.TotalLoadTime / time.Duration(total)
+}
+
+// String returns a string representation of this statistics.
+func (s *Stats) String() string {
+	return fmt.Sprintf("hits: %d, misses: %d, successes: %d, errors: %d, time: %s, evictions: %d",
+		s.HitCount, s.MissCount, s.LoadSuccessCount, s.LoadErrorCount, s.TotalLoadTime, s.EvictionCount)
 }
 
 // StatsCounter accumulates statistics of a cache.
