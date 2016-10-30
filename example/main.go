@@ -17,7 +17,7 @@ func report(c cache.Cache) {
 	c.Stats(st)
 
 	fmt.Printf("total: %d, hits: %d (%.2f%%), misses: %d (%.2f%%), evictions: %d, load: %s (%s)\n",
-		st.RequestCount(), st.HitCount, st.HitRate(), st.MissCount, st.MissRate(),
+		st.RequestCount(), st.HitCount, st.HitRate()*100.0, st.MissCount, st.MissRate()*100.0,
 		st.EvictionCount, st.TotalLoadTime, st.AverageLoadPenalty())
 }
 

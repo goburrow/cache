@@ -36,9 +36,10 @@ func benchmarkCache(b *testing.B, c Cache) {
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			k := rand.Intn(distinctKeys)
-			c.Put(k, b)
-			k = rand.Intn(distinctKeys)
-			_, _ = c.GetIfPresent(k)
+			_, ok := c.GetIfPresent(k)
+			if !ok {
+				c.Put(k, k)
+			}
 		}
 	})
 }
