@@ -55,8 +55,8 @@ func TestMaximumSize(t *testing.T) {
 		k := rand.Intn(2 * max)
 		c.Put(k, k)
 		time.Sleep(time.Duration(i+1) * time.Millisecond)
-		if len(c.cache) > max || c.entries.Len() > max {
-			t.Fatalf("unexpected cache size: %v, %v", len(c.cache), c.entries.Len())
+		if len(c.cache.data) > max || c.entries.length() > max {
+			t.Fatalf("unexpected cache size: %v, %v", len(c.cache.data), c.entries.length())
 		}
 	}
 }
@@ -68,7 +68,7 @@ func TestRemovalListener(t *testing.T) {
 		removed[k] = v.(int)
 		wg.Done()
 	}
-	insFunc := func(Key, Value) {
+	insFunc := func(k Key, v Value) {
 		wg.Done()
 	}
 	max := 3
@@ -174,7 +174,7 @@ func simpleLoader(k Key) (Value, error) {
 	return k, nil
 }
 
-func TestStats(t *testing.T) {
+func TestCacheStats(t *testing.T) {
 	wg := sync.WaitGroup{}
 	insFunc := func(Key, Value) {
 		wg.Done()
@@ -226,15 +226,15 @@ func TestExpireAfterAccess(t *testing.T) {
 		return now.Add(1 * time.Second)
 	}
 	c.expireEntries()
-	if c.entries.Len() != 1 {
-		t.Fatalf("unexpected entries length: %d", c.entries.Len())
+	if len(c.cache.data) != 1 || c.entries.length() != 1 {
+		t.Fatalf("unexpected entries length: %d, %d", len(c.cache.data), c.entries.length())
 	}
 	currentTime = func() time.Time {
 		return now.Add(1*time.Second + 1)
 	}
 	c.expireEntries()
-	if c.entries.Len() != 0 {
-		t.Fatalf("unexpected entries length: %d", c.entries.Len())
+	if len(c.cache.data) != 0 || c.entries.length() != 0 {
+		t.Fatalf("unexpected entries length: %d, %d", len(c.cache.data), c.entries.length())
 	}
 }
 
@@ -280,10 +280,12 @@ func TestRefreshAfterWrite(t *testing.T) {
 	currentTime = func() time.Time {
 		return now.Add(1*time.Second + 1)
 	}
+	wg.Add(1)
 	v, err = c.Get("refresh")
 	if err != nil {
 		t.Fatal(err)
 	}
+	wg.Wait()
 	if v.(int) != 2 || loadCount != 2 {
 		t.Fatalf("unexpected load count: %v, %v", v, loadCount)
 	}

@@ -31,18 +31,25 @@ type entry struct {
 	updated time.Time
 }
 
+// getEntry returns the entry attached to the given list element.
 func getEntry(el *list.Element) *entry {
 	return el.Value.(*entry)
 }
 
+// setEntry updates value of the given list element.
 func setEntry(el *list.Element, en *entry) {
 	el.Value = en
 }
 
+// cache is a data structure for cache entries.
+type cache struct {
+	cap  int
+	mu   sync.RWMutex
+	data map[Key]*list.Element
+}
+
 // localCache is an asynchronous LRU cache.
 type localCache struct {
-	maximumSize int
-
 	expireAfterAccess time.Duration
 	refreshAfterWrite time.Duration
 
@@ -52,10 +59,9 @@ type localCache struct {
 	loader LoaderFunc
 	stats  StatsCounter
 
-	cacheMu sync.RWMutex
-	cache   map[Key]*list.Element
+	cache cache
 
-	entries     list.List
+	entries     lruCache
 	addEntry    chan *entry
 	accessEntry chan *list.Element
 	deleteEntry chan *list.Element
@@ -66,22 +72,25 @@ type localCache struct {
 	closeCh chan struct{}
 }
 
-// newLocalCache returns a default localCache
+// newLocalCache returns a default localCache.
+// init must be called before this cache can be used.
 func newLocalCache() *localCache {
-	c := &localCache{
-		maximumSize: defaultMaxSize,
-		stats:       &statsCounter{},
-		cache:       make(map[Key]*list.Element),
-
-		addEntry:    make(chan *entry, chanBufSize),
-		accessEntry: make(chan *list.Element, chanBufSize),
-		deleteEntry: make(chan *list.Element, chanBufSize),
+	return &localCache{
+		cache: cache{
+			cap:  defaultMaxSize,
+			data: make(map[Key]*list.Element),
+		},
+		stats: &statsCounter{},
 	}
-	c.entries.Init()
-	return c
 }
 
-func (c *localCache) start() {
+func (c *localCache) init() {
+	c.entries.init(&c.cache)
+
+	c.addEntry = make(chan *entry, chanBufSize)
+	c.accessEntry = make(chan *list.Element, chanBufSize)
+	c.deleteEntry = make(chan *list.Element, chanBufSize)
+
 	c.closeCh = make(chan struct{})
 	go c.processEntries()
 }
@@ -96,9 +105,9 @@ func (c *localCache) Close() error {
 // GetIfPresent gets cached value from entries list and updates
 // last access time for the entry if it is found.
 func (c *localCache) GetIfPresent(k Key) (Value, bool) {
-	c.cacheMu.RLock()
-	el, hit := c.cache[k]
-	c.cacheMu.RUnlock()
+	c.cache.mu.RLock()
+	el, hit := c.cache.data[k]
+	c.cache.mu.RUnlock()
 	if !hit {
 		c.accessEntry <- nil
 		c.stats.RecordMisses(1)
@@ -112,9 +121,9 @@ func (c *localCache) GetIfPresent(k Key) (Value, bool) {
 
 // Put adds new entry to entries list.
 func (c *localCache) Put(k Key, v Value) {
-	c.cacheMu.RLock()
-	el, hit := c.cache[k]
-	c.cacheMu.RUnlock()
+	c.cache.mu.RLock()
+	el, hit := c.cache.data[k]
+	c.cache.mu.RUnlock()
 	if hit {
 		// Update list element value
 		getEntry(el).value = v
@@ -130,9 +139,9 @@ func (c *localCache) Put(k Key, v Value) {
 
 // Invalidate removes the entry associated with key k.
 func (c *localCache) Invalidate(k Key) {
-	c.cacheMu.RLock()
-	el, hit := c.cache[k]
-	c.cacheMu.RUnlock()
+	c.cache.mu.RLock()
+	el, hit := c.cache.data[k]
+	c.cache.mu.RUnlock()
 	if hit {
 		c.deleteEntry <- el
 	}
@@ -147,9 +156,9 @@ func (c *localCache) InvalidateAll() {
 // if it is not in the cache. The returned value is only cached when loader returns
 // nil error.
 func (c *localCache) Get(k Key) (Value, error) {
-	c.cacheMu.RLock()
-	el, hit := c.cache[k]
-	c.cacheMu.RUnlock()
+	c.cache.mu.RLock()
+	el, hit := c.cache.data[k]
+	c.cache.mu.RUnlock()
 	if !hit {
 		c.stats.RecordMisses(1)
 		return c.load(k)
@@ -181,7 +190,7 @@ func (c *localCache) processEntries() {
 			c.postWriteCleanup()
 		case el := <-c.accessEntry:
 			if el != nil {
-				c.touch(el)
+				c.access(el)
 			}
 			c.postReadCleanup()
 		case el := <-c.deleteEntry:
@@ -198,54 +207,30 @@ func (c *localCache) processEntries() {
 func (c *localCache) add(en *entry) {
 	en.accessed = currentTime()
 	en.updated = en.accessed
-	c.cacheMu.Lock()
-	el, ok := c.cache[en.key]
-	if ok {
-		c.cacheMu.Unlock()
-		setEntry(el, en)
-		c.entries.MoveToFront(el)
-	} else {
-		var remEn *entry
-		if c.maximumSize > 0 && c.entries.Len() >= c.maximumSize {
-			// Swap with the oldest one
-			el = c.entries.Back()
-			if el == nil {
-				// This can not happen
-				el = c.entries.PushFront(en)
-			} else {
-				remEn = getEntry(el)
-				delete(c.cache, remEn.key)
-				setEntry(el, en)
-				c.entries.MoveToFront(el)
-			}
-		} else {
-			el = c.entries.PushFront(en)
-		}
-		c.cache[en.key] = el
-		c.cacheMu.Unlock()
-		if c.onInsertion != nil {
-			c.onInsertion(en.key, en.value)
-		}
-		if remEn != nil {
-			// An entry has been evicted
-			c.stats.RecordEviction()
-			if c.onRemoval != nil {
-				c.onRemoval(remEn.key, remEn.value)
-			}
+
+	remEn := c.entries.add(en)
+	if c.onInsertion != nil {
+		c.onInsertion(en.key, en.value)
+	}
+	if remEn != nil {
+		// An entry has been evicted
+		c.stats.RecordEviction()
+		if c.onRemoval != nil {
+			c.onRemoval(remEn.key, remEn.value)
 		}
 	}
 }
 
 // removeAll remove all entries in the cache.
 func (c *localCache) removeAll() {
-	c.cacheMu.Lock()
-	oldCache := c.cache
-	c.cache = make(map[Key]*list.Element)
-	c.cacheMu.Unlock()
-	c.entries.Init()
+	c.cache.mu.Lock()
+	oldData := c.cache.data
+	c.cache.data = make(map[Key]*list.Element)
+	c.entries.init(&c.cache)
+	c.cache.mu.Unlock()
 
 	if c.onRemoval != nil {
-		for _, el := range oldCache {
+		for _, el := range oldData {
 			en := getEntry(el)
 			c.onRemoval(en.key, en.value)
 		}
@@ -255,21 +240,17 @@ func (c *localCache) removeAll() {
 // remove removes the given element from the cache and entries list.
 // It also calls onRemoval callback if it is set.
 func (c *localCache) remove(el *list.Element) {
-	en := getEntry(el)
-	c.cacheMu.Lock()
-	delete(c.cache, en.key)
-	c.cacheMu.Unlock()
-	c.entries.Remove(el)
+	en := c.entries.remove(el)
 
-	if c.onRemoval != nil {
+	if en != nil && c.onRemoval != nil {
 		c.onRemoval(en.key, en.value)
 	}
 }
 
-// touch moves the given element to the top of the entries list.
-func (c *localCache) touch(el *list.Element) {
+// access moves the given element to the top of the entries list.
+func (c *localCache) access(el *list.Element) {
 	getEntry(el).accessed = currentTime()
-	c.entries.MoveToFront(el)
+	c.entries.access(el)
 }
 
 // load uses current loader to retrieve value for k and adds new
@@ -335,8 +316,12 @@ func (c *localCache) expireEntries() {
 		return
 	}
 	expire := currentTime().Add(-c.expireAfterAccess)
-	for i := drainMax; i > 0; i-- {
-		el := c.entries.Back()
+	c.removeExpired(expire, &c.entries.ls, drainMax)
+}
+
+func (c *localCache) removeExpired(expire time.Time, ls *list.List, max int) int {
+	for ; max > 0; max-- {
+		el := ls.Back()
 		if el == nil {
 			// List is empty
 			break
@@ -349,6 +334,7 @@ func (c *localCache) expireEntries() {
 		c.remove(el)
 		c.stats.RecordEviction()
 	}
+	return max
 }
 
 // New returns a local in-memory Cache.
@@ -357,7 +343,7 @@ func New(options ...Option) Cache {
 	for _, opt := range options {
 		opt(c)
 	}
-	c.start()
+	c.init()
 	return c
 }
 
@@ -369,7 +355,7 @@ func NewLoadingCache(loader LoaderFunc, options ...Option) LoadingCache {
 	for _, opt := range options {
 		opt(c)
 	}
-	c.start()
+	c.init()
 	return c
 }
 
@@ -379,8 +365,11 @@ type Option func(c *localCache)
 // WithMaximumSize returns an Option which sets maximum size for default Cache.
 // Any non-positive numbers is considered as unlimited.
 func WithMaximumSize(size int) Option {
+	if size < 0 {
+		size = 0
+	}
 	return func(c *localCache) {
-		c.maximumSize = size
+		c.cache.cap = size
 	}
 }
 
