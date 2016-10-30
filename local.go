@@ -29,6 +29,8 @@ type entry struct {
 	accessed time.Time
 	// updated is the last time this entry was updated.
 	updated time.Time
+	// listID is ID of the list which this entry is currently in.
+	listID listID
 }
 
 // getEntry returns the entry attached to the given list element.
@@ -61,7 +63,7 @@ type localCache struct {
 
 	cache cache
 
-	entries     lruCache
+	entries     slruCache
 	addEntry    chan *entry
 	accessEntry chan *list.Element
 	deleteEntry chan *list.Element
@@ -316,7 +318,8 @@ func (c *localCache) expireEntries() {
 		return
 	}
 	expire := currentTime().Add(-c.expireAfterAccess)
-	c.removeExpired(expire, &c.entries.ls, drainMax)
+	remain := c.removeExpired(expire, &c.entries.probationLs, drainMax)
+	c.removeExpired(expire, &c.entries.protectedLs, remain)
 }
 
 func (c *localCache) removeExpired(expire time.Time, ls *list.List, max int) int {
