@@ -1,41 +1,72 @@
 package cache
 
 import (
-	"math/rand"
 	"testing"
 	"time"
+
+	"github.com/goburrow/cache/synthetic"
 )
 
 const (
-	distinctKeys    = 4096
-	reportThreshold = 10000
+	testMaxSize        = 512
+	benchmarkThreshold = 100
 )
 
-func init() {
-	rand.Seed(time.Now().UnixNano())
+func BenchmarkUniform(b *testing.B) {
+	distintKeys := testMaxSize * 2
+	g := synthetic.Uniform(0, distintKeys)
+	benchmarkCache(b, g)
 }
 
-func BenchmarkCache(b *testing.B) {
-	c := New(WithMaximumSize(distinctKeys))
-	benchmarkCache(b, c)
+func BenchmarkUniformLess(b *testing.B) {
+	distintKeys := testMaxSize
+	g := synthetic.Uniform(0, distintKeys)
+	benchmarkCache(b, g)
 }
 
-func BenchmarkCacheHalf(b *testing.B) {
-	c := New(WithMaximumSize(distinctKeys / 2))
-	benchmarkCache(b, c)
+func BenchmarkCounter(b *testing.B) {
+	g := synthetic.Counter(0)
+	benchmarkCache(b, g)
 }
 
-func benchmarkCache(b *testing.B, c Cache) {
+func BenchmarkExponential(b *testing.B) {
+	g := synthetic.Exponential(1.0)
+	benchmarkCache(b, g)
+}
+
+func BenchmarkZipf(b *testing.B) {
+	items := testMaxSize * 10
+	g := synthetic.Zipf(0, items, 1.01)
+	benchmarkCache(b, g)
+}
+
+func BenchmarkHotspot(b *testing.B) {
+	items := testMaxSize * 2
+	g := synthetic.Hotspot(0, items, 0.25)
+	benchmarkCache(b, g)
+}
+
+func benchmarkCache(b *testing.B, g synthetic.Generator) {
+	c := New(WithMaximumSize(testMaxSize))
 	defer c.Close()
-	b.ResetTimer()
-	b.ReportAllocs()
 
-	if b.N > reportThreshold {
+	intCh := make(chan int, 100)
+	go func() {
+		for i := 0; i < b.N; i++ {
+			intCh <- g.Int()
+		}
+	}()
+	defer close(intCh)
+
+	if b.N > benchmarkThreshold {
 		defer printStats(b, c, time.Now())
 	}
+
+	b.ResetTimer()
+	b.ReportAllocs()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			k := rand.Intn(distinctKeys)
+			k := <-intCh
 			_, ok := c.GetIfPresent(k)
 			if !ok {
 				c.Put(k, k)
@@ -50,7 +81,9 @@ func printStats(b *testing.B, c Cache, start time.Time) {
 	var st Stats
 	c.Stats(&st)
 
-	b.Logf("total: %d (%s), hits: %d (%.2f%%), misses: %d (%.2f%%), evictions: %d, load: %s (%s)\n",
-		st.RequestCount(), dur, st.HitCount, st.HitRate()*100.0, st.MissCount, st.MissRate()*100.0,
-		st.EvictionCount, st.TotalLoadTime, st.AverageLoadPenalty())
+	b.Logf("total: %d (%s), hits: %d (%.2f%%), misses: %d (%.2f%%), evictions: %d\n",
+		st.RequestCount(), dur,
+		st.HitCount, st.HitRate()*100.0,
+		st.MissCount, st.MissRate()*100.0,
+		st.EvictionCount)
 }
