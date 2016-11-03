@@ -26,10 +26,9 @@ func assertLRUEntry(t *testing.T, en *entry, k int, v string, id listID) {
 func TestLRU(t *testing.T) {
 	c := &cache{
 		data: make(map[Key]*list.Element),
-		cap:  3,
 	}
 	l := &lruCache{}
-	l.init(c)
+	l.init(c, 3)
 
 	en := make([]*entry, 4)
 	for i := 0; i < len(en); i++ {
@@ -78,10 +77,9 @@ func TestLRU(t *testing.T) {
 func TestSegmentedLRU(t *testing.T) {
 	c := &cache{
 		data: make(map[Key]*list.Element),
-		cap:  3,
 	}
 	l := &slruCache{}
-	l.init(c)
+	l.init(c, 3)
 	l.probationCap = 1
 	l.protectedCap = 2
 

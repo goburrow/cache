@@ -5,12 +5,14 @@ import "container/list"
 // lruCache is a LRU cache.
 type lruCache struct {
 	cache *cache
+	cap   int
 	ls    list.List
 }
 
 // init initializes cache list.
-func (l *lruCache) init(c *cache) {
+func (l *lruCache) init(c *cache, cap int) {
 	l.cache = c
+	l.cap = cap
 	l.ls.Init()
 }
 
@@ -26,7 +28,7 @@ func (l *lruCache) add(en *entry) *entry {
 		l.ls.MoveToFront(el)
 		return nil
 	}
-	if l.cache.cap <= 0 || l.ls.Len() < l.cache.cap {
+	if l.cap <= 0 || l.ls.Len() < l.cap {
 		// Add this entry
 		el = l.ls.PushFront(en)
 		l.cache.data[en.key] = el
@@ -96,10 +98,10 @@ type slruCache struct {
 }
 
 // init initializes the cache list.
-func (l *slruCache) init(c *cache) {
+func (l *slruCache) init(c *cache, cap int) {
 	l.cache = c
-	l.protectedCap = int(float64(c.cap) * protectedPercentage)
-	l.probationCap = c.cap - l.protectedCap
+	l.protectedCap = int(float64(cap) * protectedPercentage)
+	l.probationCap = cap - l.protectedCap
 	l.probationLs.Init()
 	l.protectedLs.Init()
 }

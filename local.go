@@ -45,7 +45,6 @@ func setEntry(el *list.Element, en *entry) {
 
 // cache is a data structure for cache entries.
 type cache struct {
-	cap  int
 	mu   sync.RWMutex
 	data map[Key]*list.Element
 }
@@ -61,7 +60,8 @@ type localCache struct {
 	loader LoaderFunc
 	stats  StatsCounter
 
-	cache cache
+	maximumSize int
+	cache       cache
 
 	entries     slruCache
 	addEntry    chan *entry
@@ -78,8 +78,8 @@ type localCache struct {
 // init must be called before this cache can be used.
 func newLocalCache() *localCache {
 	return &localCache{
+		maximumSize: defaultMaxSize,
 		cache: cache{
-			cap:  defaultMaxSize,
 			data: make(map[Key]*list.Element),
 		},
 		stats: &statsCounter{},
@@ -87,7 +87,7 @@ func newLocalCache() *localCache {
 }
 
 func (c *localCache) init() {
-	c.entries.init(&c.cache)
+	c.entries.init(&c.cache, c.maximumSize)
 
 	c.addEntry = make(chan *entry, chanBufSize)
 	c.accessEntry = make(chan *list.Element, chanBufSize)
@@ -228,7 +228,7 @@ func (c *localCache) removeAll() {
 	c.cache.mu.Lock()
 	oldData := c.cache.data
 	c.cache.data = make(map[Key]*list.Element)
-	c.entries.init(&c.cache)
+	c.entries.init(&c.cache, c.maximumSize)
 	c.cache.mu.Unlock()
 
 	if c.onRemoval != nil {
@@ -372,7 +372,7 @@ func WithMaximumSize(size int) Option {
 		size = 0
 	}
 	return func(c *localCache) {
-		c.cache.cap = size
+		c.maximumSize = size
 	}
 }
 
