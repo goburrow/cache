@@ -13,7 +13,7 @@ func TestWikipedia(t *testing.T) {
 	opt := options{
 		cacheSize:      512,
 		reportInterval: 1000,
-		maxItems:       5000000,
+		maxItems:       2000000,
 	}
 
 	r, err := openFilesGlob(traceFiles)
