@@ -54,8 +54,8 @@ func (l *lruCache) length() int {
 	return l.ls.Len()
 }
 
-// access updates cache entry for a get.
-func (l *lruCache) access(el *list.Element) {
+// hit updates cache entry for a get.
+func (l *lruCache) hit(el *list.Element) {
 	l.ls.MoveToFront(el)
 }
 
@@ -76,13 +76,13 @@ func (l *lruCache) remove(el *list.Element) *entry {
 type listID int
 
 const (
-	admission listID = iota
+	admissionWindow listID = iota
 	probationSegment
 	protectedSegment
 )
 
 const (
-	protectedPercentage = 0.8
+	protectedRatio = 0.8
 )
 
 // slruCache is a segmented LRU.
@@ -100,7 +100,7 @@ type slruCache struct {
 // init initializes the cache list.
 func (l *slruCache) init(c *cache, cap int) {
 	l.cache = c
-	l.protectedCap = int(float64(cap) * protectedPercentage)
+	l.protectedCap = int(float64(cap) * protectedRatio)
 	l.probationCap = cap - l.protectedCap
 	l.probationLs.Init()
 	l.protectedLs.Init()
@@ -150,8 +150,8 @@ func (l *slruCache) add(en *entry) *entry {
 	return remEn
 }
 
-// access updates cache entry for a get.
-func (l *slruCache) access(el *list.Element) {
+// hit updates cache entry for a get.
+func (l *slruCache) hit(el *list.Element) {
 	en := getEntry(el)
 
 	// Already in the protected segment
@@ -249,4 +249,16 @@ func (l *slruCache) remove(el *list.Element) *entry {
 	}
 	delete(l.cache.data, en.key)
 	return en
+}
+
+// victim returns the last entry in probation list if total entries reached the limit.
+func (l *slruCache) victim() *entry {
+	if l.probationCap <= 0 || l.length() < (l.probationCap+l.protectedCap) {
+		return nil
+	}
+	el := l.probationLs.Back()
+	if el == nil {
+		return nil
+	}
+	return getEntry(el)
 }

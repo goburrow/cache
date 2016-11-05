@@ -9,7 +9,8 @@ import (
 
 const (
 	// Default maximum number of cache entries.
-	defaultMaxSize = 1<<31 - 1
+	defaultCapacity = 1<<15 - 1
+	maximumCapacity = 1<<31 - 1
 	// Buffer size of entry channels
 	chanBufSize = 1
 	// Maximum number of entries to be drained in a single clean up.
@@ -31,6 +32,8 @@ type entry struct {
 	updated time.Time
 	// listID is ID of the list which this entry is currently in.
 	listID listID
+	// hash is the hash value of this entry key
+	hash uint64
 }
 
 // getEntry returns the entry attached to the given list element.
@@ -60,12 +63,12 @@ type localCache struct {
 	loader LoaderFunc
 	stats  StatsCounter
 
-	maximumSize int
-	cache       cache
+	cap   int
+	cache cache
 
-	entries     slruCache
+	entries     tinyLFU
 	addEntry    chan *entry
-	accessEntry chan *list.Element
+	hitEntry    chan *list.Element
 	deleteEntry chan *list.Element
 
 	// readCount is a counter of the number of reads since the last write.
@@ -78,7 +81,7 @@ type localCache struct {
 // init must be called before this cache can be used.
 func newLocalCache() *localCache {
 	return &localCache{
-		maximumSize: defaultMaxSize,
+		cap: defaultCapacity,
 		cache: cache{
 			data: make(map[Key]*list.Element),
 		},
@@ -87,10 +90,10 @@ func newLocalCache() *localCache {
 }
 
 func (c *localCache) init() {
-	c.entries.init(&c.cache, c.maximumSize)
+	c.entries.init(&c.cache, c.cap)
 
 	c.addEntry = make(chan *entry, chanBufSize)
-	c.accessEntry = make(chan *list.Element, chanBufSize)
+	c.hitEntry = make(chan *list.Element, chanBufSize)
 	c.deleteEntry = make(chan *list.Element, chanBufSize)
 
 	c.closeCh = make(chan struct{})
@@ -111,12 +114,11 @@ func (c *localCache) GetIfPresent(k Key) (Value, bool) {
 	el, hit := c.cache.data[k]
 	c.cache.mu.RUnlock()
 	if !hit {
-		c.accessEntry <- nil
 		c.stats.RecordMisses(1)
 		return nil, false
 	}
 	v := getEntry(el).value
-	c.accessEntry <- el
+	c.hitEntry <- el
 	c.stats.RecordHits(1)
 	return v, true
 }
@@ -129,11 +131,12 @@ func (c *localCache) Put(k Key, v Value) {
 	if hit {
 		// Update list element value
 		getEntry(el).value = v
-		c.accessEntry <- el
+		c.hitEntry <- el
 	} else {
 		en := &entry{
 			key:   k,
 			value: v,
+			hash:  sum(k),
 		}
 		c.addEntry <- en
 	}
@@ -172,7 +175,7 @@ func (c *localCache) Get(k Key) (Value, error) {
 		return c.refresh(en), nil
 	}
 	v := en.value
-	c.accessEntry <- el
+	c.hitEntry <- el
 	return v, nil
 }
 
@@ -190,10 +193,8 @@ func (c *localCache) processEntries() {
 		case en := <-c.addEntry:
 			c.add(en)
 			c.postWriteCleanup()
-		case el := <-c.accessEntry:
-			if el != nil {
-				c.access(el)
-			}
+		case el := <-c.hitEntry:
+			c.hit(el)
 			c.postReadCleanup()
 		case el := <-c.deleteEntry:
 			if el == nil {
@@ -228,7 +229,7 @@ func (c *localCache) removeAll() {
 	c.cache.mu.Lock()
 	oldData := c.cache.data
 	c.cache.data = make(map[Key]*list.Element)
-	c.entries.init(&c.cache, c.maximumSize)
+	c.entries.init(&c.cache, c.cap)
 	c.cache.mu.Unlock()
 
 	if c.onRemoval != nil {
@@ -249,10 +250,10 @@ func (c *localCache) remove(el *list.Element) {
 	}
 }
 
-// access moves the given element to the top of the entries list.
-func (c *localCache) access(el *list.Element) {
+// hit moves the given element to the top of the entries list.
+func (c *localCache) hit(el *list.Element) {
 	getEntry(el).accessed = currentTime()
-	c.entries.access(el)
+	c.entries.hit(el)
 }
 
 // load uses current loader to retrieve value for k and adds new
@@ -271,6 +272,7 @@ func (c *localCache) load(k Key) (Value, error) {
 	en := &entry{
 		key:   k,
 		value: v,
+		hash:  sum(k),
 	}
 	c.addEntry <- en
 	c.stats.RecordLoadSuccess(loadTime)
@@ -318,8 +320,13 @@ func (c *localCache) expireEntries() {
 		return
 	}
 	expire := currentTime().Add(-c.expireAfterAccess)
-	remain := c.removeExpired(expire, &c.entries.probationLs, drainMax)
-	c.removeExpired(expire, &c.entries.protectedLs, remain)
+	remain := c.removeExpired(expire, &c.entries.slru.protectedLs, drainMax)
+	if remain > 0 {
+		remain = c.removeExpired(expire, &c.entries.slru.probationLs, remain)
+		if remain > 0 {
+			c.removeExpired(expire, &c.entries.lru.ls, remain)
+		}
+	}
 }
 
 func (c *localCache) removeExpired(expire time.Time, ls *list.List, max int) int {
@@ -365,14 +372,17 @@ func NewLoadingCache(loader LoaderFunc, options ...Option) LoadingCache {
 // Option add options for default Cache.
 type Option func(c *localCache)
 
-// WithMaximumSize returns an Option which sets maximum size for default Cache.
+// WithMaximumSize returns an Option which sets maximum size for the cache.
 // Any non-positive numbers is considered as unlimited.
 func WithMaximumSize(size int) Option {
 	if size < 0 {
 		size = 0
 	}
+	if size > maximumCapacity {
+		size = maximumCapacity
+	}
 	return func(c *localCache) {
-		c.maximumSize = size
+		c.cap = size
 	}
 }
 
@@ -404,6 +414,14 @@ func WithRefreshAfterWrite(d time.Duration) Option {
 func WithStatsCounter(st StatsCounter) Option {
 	return func(c *localCache) {
 		c.stats = st
+	}
+}
+
+// WithDoorkeeperEnabled returns an option which enables TinyLFU doorkeeper.
+// TODO: enable this option by default.
+func WithDoorkeeperEnabled() Option {
+	return func(c *localCache) {
+		c.entries.doorkeeperEnabled = true
 	}
 }
 

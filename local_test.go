@@ -40,9 +40,10 @@ func TestCache(t *testing.T) {
 func TestMaximumSize(t *testing.T) {
 	max := 10
 	wg := sync.WaitGroup{}
-	c := New(WithMaximumSize(max), withInsertionListener(func(Key, Value) {
+	insFunc := func(k Key, v Value) {
 		wg.Done()
-	})).(*localCache)
+	}
+	c := New(WithMaximumSize(max), withInsertionListener(insFunc)).(*localCache)
 	defer c.Close()
 
 	wg.Add(max)
@@ -50,13 +51,18 @@ func TestMaximumSize(t *testing.T) {
 		c.Put(i, i)
 	}
 	wg.Wait()
+	if len(c.cache.data) != max || c.entries.length() != max {
+		t.Fatalf("unexpected cache size: %v, %v, want: %v",
+			len(c.cache.data), c.entries.length(), max)
+	}
 	c.onInsertion = nil
 	for i := 0; i < 2*max; i++ {
 		k := rand.Intn(2 * max)
 		c.Put(k, k)
 		time.Sleep(time.Duration(i+1) * time.Millisecond)
-		if len(c.cache.data) > max || c.entries.length() > max {
-			t.Fatalf("unexpected cache size: %v, %v", len(c.cache.data), c.entries.length())
+		if len(c.cache.data) != max || c.entries.length() != max {
+			t.Fatalf("unexpected cache size: %v, %v, want: %v)",
+				len(c.cache.data), c.entries.length(), max)
 		}
 	}
 }
