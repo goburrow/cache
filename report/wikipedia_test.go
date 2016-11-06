@@ -5,15 +5,25 @@ import (
 	"testing"
 )
 
-func TestWikipedia(t *testing.T) {
-	const (
-		traceFiles = "wiki.[1-9]*"
-		reportFile = "report-wikipedia.txt"
-	)
+func TestWikipediaLRU(t *testing.T) {
+	testWikipedia(t, "lru", "wikipedia-lru.txt")
+}
+
+func TestWikipediaSLRU(t *testing.T) {
+	testWikipedia(t, "slru", "wikipedia-slru.txt")
+}
+
+func TestWikipediaTinyLFU(t *testing.T) {
+	testWikipedia(t, "tinylfu", "wikipedia-tinylfu.txt")
+}
+
+func testWikipedia(t *testing.T, policy, reportFile string) {
+	traceFiles := "wiki.[1-9]*"
 	opt := options{
+		policy:         policy,
 		cacheSize:      512,
 		reportInterval: 1000,
-		maxItems:       2000000,
+		maxItems:       1000000,
 	}
 
 	r, err := openFilesGlob(traceFiles)

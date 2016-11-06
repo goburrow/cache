@@ -4,16 +4,24 @@
 
 Partial implementations of [Guava Cache](https://github.com/google/guava) in Go.
 
+Supported cache replacement policies:
+
+- LRU
+- Segmented LRU (default)
+- TinyLFU (experimental)
+
 The TinyLFU implementation is inspired by
 [Caffeine](https://github.com/ben-manes/caffeine) by Ben Manes and
 [go-tinylfu](https://github.com/dgryski/go-tinylfu) by Damian Gryski.
 
 ## Download
+
 ```
 go get -u github.com/goburrow/cache
 ```
 
 ## Example
+
 ```go
 package main
 
@@ -55,3 +63,10 @@ func main() {
 	}
 }
 ```
+
+## Efficiency
+
+See [report](report/)
+
+![wikipedia](report/wikipedia.svg)
+![youtube](report/youtube.svg)

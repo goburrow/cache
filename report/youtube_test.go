@@ -5,12 +5,22 @@ import (
 	"testing"
 )
 
-func TestYoutube(t *testing.T) {
-	const (
-		traceFiles = "youtube.parsed.*.dat"
-		reportFile = "report-youtube.txt"
-	)
+func TestYouTubeLRU(t *testing.T) {
+	testYouTube(t, "lru", "youtube-lru.txt")
+}
+
+func TestYouTubeSLRU(t *testing.T) {
+	testYouTube(t, "slru", "youtube-slru.txt")
+}
+
+func TestYouTubeTinyLFU(t *testing.T) {
+	testYouTube(t, "tinylfu", "youtube-tinylfu.txt")
+}
+
+func testYouTube(t *testing.T, policy, reportFile string) {
+	traceFiles := "youtube.parsed.*.dat"
 	opt := options{
+		policy:         policy,
 		cacheSize:      1024,
 		reportInterval: 1000,
 		maxItems:       2000000,

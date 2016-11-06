@@ -1,4 +1,5 @@
-// Package cache provides partial implementations of Guava Cache.
+// Package cache provides partial implementations of Guava Cache,
+// including support for LRU, Segmented LRU and TinyLFU.
 package cache
 
 // Key is any value which is comparable.

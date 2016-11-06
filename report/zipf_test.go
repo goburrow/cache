@@ -5,14 +5,24 @@ import (
 	"testing"
 )
 
-func TestZipf(t *testing.T) {
-	const (
-		reportFile = "report-zipf.txt"
-	)
+func TestZipfLRU(t *testing.T) {
+	testZipf(t, "lru", "zipf-lru.txt")
+}
+
+func TestZipfSLRU(t *testing.T) {
+	testZipf(t, "slru", "zipf-slru.txt")
+}
+
+func TestZipfTinyLFU(t *testing.T) {
+	testZipf(t, "tinylfu", "zipf-tinylfu.txt")
+}
+
+func testZipf(t *testing.T, policy, reportFile string) {
 	opt := options{
+		policy:         policy,
 		cacheSize:      512,
 		reportInterval: 1000,
-		maxItems:       2000000,
+		maxItems:       1000000,
 	}
 
 	provider := NewZipfProvider(1.1, opt.maxItems)

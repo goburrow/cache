@@ -36,13 +36,14 @@ func (r *reporter) Report(st cache.Stats) {
 }
 
 type options struct {
+	policy         string
 	cacheSize      int
 	reportInterval int
 	maxItems       int
 }
 
 func benchmarkCache(p Provider, r Reporter, opt options) {
-	c := cache.New(cache.WithMaximumSize(opt.cacheSize))
+	c := cache.New(cache.WithMaximumSize(opt.cacheSize), cache.WithPolicy(opt.policy))
 	defer c.Close()
 
 	keys := make(chan interface{}, 100)
