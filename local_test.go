@@ -51,18 +51,16 @@ func TestMaximumSize(t *testing.T) {
 		c.Put(i, i)
 	}
 	wg.Wait()
-	if len(c.cache.data) != max || c.entries.length() != max {
-		t.Fatalf("unexpected cache size: %v, %v, want: %v",
-			len(c.cache.data), c.entries.length(), max)
+	if len(c.cache.data) != max {
+		t.Fatalf("unexpected cache size: %v, want: %v", len(c.cache.data), max)
 	}
 	c.onInsertion = nil
 	for i := 0; i < 2*max; i++ {
 		k := rand.Intn(2 * max)
 		c.Put(k, k)
 		time.Sleep(time.Duration(i+1) * time.Millisecond)
-		if len(c.cache.data) != max || c.entries.length() != max {
-			t.Fatalf("unexpected cache size: %v, %v, want: %v)",
-				len(c.cache.data), c.entries.length(), max)
+		if len(c.cache.data) != max {
+			t.Fatalf("unexpected cache size: %v, want: %v", len(c.cache.data), max)
 		}
 	}
 }
@@ -232,15 +230,15 @@ func TestExpireAfterAccess(t *testing.T) {
 		return now.Add(1 * time.Second)
 	}
 	c.expireEntries()
-	if len(c.cache.data) != 1 || c.entries.length() != 1 {
-		t.Fatalf("unexpected entries length: %d, %d", len(c.cache.data), c.entries.length())
+	if len(c.cache.data) != 1 {
+		t.Fatalf("unexpected cache size: %v, want: %v", len(c.cache.data), 1)
 	}
 	currentTime = func() time.Time {
 		return now.Add(1*time.Second + 1)
 	}
 	c.expireEntries()
-	if len(c.cache.data) != 0 || c.entries.length() != 0 {
-		t.Fatalf("unexpected entries length: %d, %d", len(c.cache.data), c.entries.length())
+	if len(c.cache.data) != 0 {
+		t.Fatalf("unexpected cache size: %v, want: %v", len(c.cache.data), 0)
 	}
 }
 

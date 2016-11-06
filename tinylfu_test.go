@@ -10,9 +10,7 @@ func TestTinyLFU(t *testing.T) {
 	c := &cache{
 		data: make(map[Key]*list.Element),
 	}
-	l := tinyLFU{
-		doorkeeperEnabled: true,
-	}
+	l := tinyLFU{}
 	l.init(c, 200)
 	if l.lru.cap+l.slru.protectedCap+l.slru.probationCap != 200 {
 		t.Fatalf("unexpected lru.cap: %d, slru.cap: %d/%d",

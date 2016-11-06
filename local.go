@@ -2,7 +2,6 @@ package cache
 
 import (
 	"container/list"
-	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -21,39 +20,9 @@ const (
 // currentTime is an alias for time.Now, used for testing.
 var currentTime = time.Now
 
-// entry stores cached entry key and value.
-type entry struct {
-	key   Key
-	value Value
-
-	// accessed is the last time this entry was accessed.
-	accessed time.Time
-	// updated is the last time this entry was updated.
-	updated time.Time
-	// listID is ID of the list which this entry is currently in.
-	listID listID
-	// hash is the hash value of this entry key
-	hash uint64
-}
-
-// getEntry returns the entry attached to the given list element.
-func getEntry(el *list.Element) *entry {
-	return el.Value.(*entry)
-}
-
-// setEntry updates value of the given list element.
-func setEntry(el *list.Element, en *entry) {
-	el.Value = en
-}
-
-// cache is a data structure for cache entries.
-type cache struct {
-	mu   sync.RWMutex
-	data map[Key]*list.Element
-}
-
 // localCache is an asynchronous LRU cache.
 type localCache struct {
+	policyName        string
 	expireAfterAccess time.Duration
 	refreshAfterWrite time.Duration
 
@@ -66,7 +35,7 @@ type localCache struct {
 	cap   int
 	cache cache
 
-	entries     tinyLFU
+	entries     policy
 	addEntry    chan *entry
 	hitEntry    chan *list.Element
 	deleteEntry chan *list.Element
@@ -90,6 +59,7 @@ func newLocalCache() *localCache {
 }
 
 func (c *localCache) init() {
+	c.entries = newPolicy(c.policyName)
 	c.entries.init(&c.cache, c.cap)
 
 	c.addEntry = make(chan *entry, chanBufSize)
@@ -320,31 +290,23 @@ func (c *localCache) expireEntries() {
 		return
 	}
 	expire := currentTime().Add(-c.expireAfterAccess)
-	remain := c.removeExpired(expire, &c.entries.slru.protectedLs, drainMax)
-	if remain > 0 {
-		remain = c.removeExpired(expire, &c.entries.slru.probationLs, remain)
-		if remain > 0 {
-			c.removeExpired(expire, &c.entries.lru.ls, remain)
+	remain := drainMax
+	c.entries.walk(func(ls *list.List) {
+		for ; remain > 0; remain-- {
+			el := ls.Back()
+			if el == nil {
+				// List is empty
+				break
+			}
+			en := getEntry(el)
+			if !en.accessed.Before(expire) {
+				// Can break since the entries list is sorted by access time
+				break
+			}
+			c.remove(el)
+			c.stats.RecordEviction()
 		}
-	}
-}
-
-func (c *localCache) removeExpired(expire time.Time, ls *list.List, max int) int {
-	for ; max > 0; max-- {
-		el := ls.Back()
-		if el == nil {
-			// List is empty
-			break
-		}
-		en := getEntry(el)
-		if !en.accessed.Before(expire) {
-			// Can break since the entries list is sorted by access time
-			break
-		}
-		c.remove(el)
-		c.stats.RecordEviction()
-	}
-	return max
+	})
 }
 
 // New returns a local in-memory Cache.
@@ -417,11 +379,11 @@ func WithStatsCounter(st StatsCounter) Option {
 	}
 }
 
-// WithDoorkeeperEnabled returns an option which enables TinyLFU doorkeeper.
-// TODO: enable this option by default.
-func WithDoorkeeperEnabled() Option {
+// WithPolicy returns an option which set cache policy associated to the given name.
+// Supported policies are: lru, slru, tinylfu.
+func WithPolicy(name string) Option {
 	return func(c *localCache) {
-		c.entries.doorkeeperEnabled = true
+		c.policyName = name
 	}
 }
 

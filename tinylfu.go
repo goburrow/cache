@@ -12,8 +12,6 @@ const (
 // and Bloom Filter as a Doorkeeper and Segmented LRU for long term retention.
 // See https://arxiv.org/pdf/1512.00727v2.pdf
 type tinyLFU struct {
-	doorkeeperEnabled bool
-
 	filter  bloomFilter    // 1bit counter
 	counter countMinSketch // 4bit counter
 
@@ -25,25 +23,16 @@ type tinyLFU struct {
 }
 
 func (l *tinyLFU) init(c *cache, cap int) {
-	var lruCap int
-	if l.doorkeeperEnabled {
-		l.samples = cap
-		l.filter.init(cap, falsePositiveProbability)
-		l.counter.init(cap)
-		lruCap = int(float64(cap) * admissionRatio)
-	} else {
-		lruCap = 0
-	}
+	l.samples = cap
+	l.filter.init(cap, falsePositiveProbability)
+	l.counter.init(cap)
+	lruCap := int(float64(cap) * admissionRatio)
 	l.lru.init(c, lruCap)
 	l.slru.init(c, cap-lruCap)
 }
 
-func (l *tinyLFU) length() int {
-	return l.lru.length() + l.slru.length()
-}
-
 func (l *tinyLFU) add(en *entry) *entry {
-	if !l.doorkeeperEnabled || l.lru.cap <= 0 {
+	if l.lru.cap <= 0 {
 		return l.slru.add(en)
 	}
 	l.increase(en.hash)
@@ -66,9 +55,7 @@ func (l *tinyLFU) add(en *entry) *entry {
 
 func (l *tinyLFU) hit(el *list.Element) {
 	en := getEntry(el)
-	if l.doorkeeperEnabled {
-		l.increase(en.hash)
-	}
+	l.increase(en.hash)
 	if en.listID == admissionWindow {
 		l.lru.hit(el)
 	} else {
@@ -106,4 +93,9 @@ func (l *tinyLFU) estimate(h uint64) uint8 {
 		freq++
 	}
 	return freq
+}
+
+func (l *tinyLFU) walk(f func(list *list.List)) {
+	l.slru.walk(f)
+	l.lru.walk(f)
 }

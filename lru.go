@@ -49,11 +49,6 @@ func (l *lruCache) add(en *entry) *entry {
 	return remEn
 }
 
-// length returns length of the cache list.
-func (l *lruCache) length() int {
-	return l.ls.Len()
-}
-
 // hit updates cache entry for a get.
 func (l *lruCache) hit(el *list.Element) {
 	l.ls.MoveToFront(el)
@@ -71,6 +66,11 @@ func (l *lruCache) remove(el *list.Element) *entry {
 	l.ls.Remove(el)
 	delete(l.cache.data, en.key)
 	return en
+}
+
+// walk walks thourgh all lists.
+func (l *lruCache) walk(f func(list *list.List)) {
+	f(&l.ls)
 }
 
 type listID int
@@ -261,4 +261,10 @@ func (l *slruCache) victim() *entry {
 		return nil
 	}
 	return getEntry(el)
+}
+
+// walk walks thourgh all lists.
+func (l *slruCache) walk(f func(list *list.List)) {
+	f(&l.protectedLs)
+	f(&l.probationLs)
 }
