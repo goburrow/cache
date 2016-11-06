@@ -1,9 +1,16 @@
 package cache
 
 import (
+	"hash/fnv"
 	"testing"
 	"unsafe"
 )
+
+func sumFNV(data []byte) uint64 {
+	h := fnv.New64a()
+	h.Write(data)
+	return h.Sum64()
+}
 
 func TestSum(t *testing.T) {
 	var tests = []struct {
@@ -28,6 +35,7 @@ func TestSum(t *testing.T) {
 		{float64(2.5), 0x4004000000000000},
 		{uintptr(unsafe.Pointer(t)), uint64(uintptr(unsafe.Pointer(t)))},
 		{"", 0xcbf29ce484222325},
+		{"string", sumFNV([]byte("string"))},
 		{t, uint64(uintptr(unsafe.Pointer(t)))},
 		{(*testing.T)(nil), 0},
 	}
@@ -39,4 +47,24 @@ func TestSum(t *testing.T) {
 				h, h, tt.k, tt.k, tt.h)
 		}
 	}
+}
+
+func BenchmarkSumInt(b *testing.B) {
+	var i interface{} = 0x0501
+	b.ReportAllocs()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			sum(i)
+		}
+	})
+}
+
+func BenchmarkSumString(b *testing.B) {
+	var s interface{} = "0913"
+	b.ReportAllocs()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			sum(s)
+		}
+	})
 }

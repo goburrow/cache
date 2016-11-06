@@ -1,7 +1,6 @@
 package cache
 
 import (
-	"hash/fnv"
 	"math"
 	"reflect"
 )
@@ -60,10 +59,19 @@ func sum(k interface{}) uint64 {
 	return 0
 }
 
-func hashBytes(b []byte) uint64 {
-	h := fnv.New64a()
-	_, _ = h.Write(b)
-	return h.Sum64()
+// hashBytes calculates hash value using FNV-1a algorithm.
+func hashBytes(data []byte) uint64 {
+	// Inline code from hash/fnv to reduce memory allocations
+	const (
+		offset64 = 14695981039346656037
+		prime64  = 1099511628211
+	)
+	var h uint64 = offset64
+	for _, b := range data {
+		h ^= uint64(b)
+		h *= prime64
+	}
+	return h
 }
 
 func hashPointer(k interface{}) (uint64, bool) {
