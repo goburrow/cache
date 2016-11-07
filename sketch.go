@@ -5,35 +5,32 @@ const sketchDepth = 4
 // countMinSketch is an implementation of count-min sketch with 4-bit counters.
 // See http://dimacs.rutgers.edu/~graham/pubs/papers/cmsoft.pdf
 type countMinSketch struct {
-	counters [sketchDepth]nybbles
+	counters []uint64
 	mask     uint32
 }
 
 // init initialize count-min sketch with the given width.
 func (c *countMinSketch) init(width int) {
-	var size uint32
-	if width > 0 {
-		size = nextPowerOfTwo(uint32(width))
-	} else {
+	// Need (width x 4 x 4) bits = width/4 x uint64
+	size := nextPowerOfTwo(uint32(width)) >> 2
+	if size < 1 {
 		size = 1
 	}
-	for i := range c.counters {
-		if len(c.counters[i]) != int(size/2) {
-			c.counters[i] = newNybbles(size)
-		} else {
-			c.counters[i].clear()
-		}
-	}
 	c.mask = size - 1
+	if len(c.counters) == int(size) {
+		c.clear()
+	} else {
+		c.counters = make([]uint64, size)
+	}
 }
 
 // add increases counters associated with the given hash.
 func (c *countMinSketch) add(h uint64) {
 	h1, h2 := uint32(h), uint32(h>>32)
 
-	for i, row := range c.counters {
-		pos := (h1 + uint32(i)*h2) & c.mask
-		row.inc(pos)
+	for i := uint32(0); i < sketchDepth; i++ {
+		idx, off := c.position(h1 + i*h2)
+		c.inc(idx, (16*i)+off)
 	}
 }
 
@@ -42,57 +39,49 @@ func (c *countMinSketch) estimate(h uint64) uint8 {
 	h1, h2 := uint32(h), uint32(h>>32)
 
 	var min uint8 = 0xFF
-	for i, row := range c.counters {
-		pos := (h1 + uint32(i)*h2) & c.mask
-		v := row.get(pos)
-		if v < min {
-			min = v
+	for i := uint32(0); i < sketchDepth; i++ {
+		idx, off := c.position(h1 + i*h2)
+		count := c.val(idx, (16*i)+off)
+		if count < min {
+			min = count
 		}
 	}
 	return min
 }
 
-// reset resets all counters.
-func (c *countMinSketch) reset() {
-	for _, row := range c.counters {
-		row.reset()
-	}
-}
-
-// nubbles is a nybble vector.
-type nybbles []byte
-
-func newNybbles(width uint32) nybbles {
-	return make(nybbles, width/2)
-}
-
-// get returns value at index i.
-func (n nybbles) get(i uint32) byte {
-	idx := i / 2
-	shift := (i & 1) * 4
-	return byte(n[idx]>>shift) & 0x0f
-}
-
-// inc increases value at index i.
-func (n nybbles) inc(i uint32) {
-	idx := i / 2
-	shift := (i & 1) * 4
-	v := (n[idx] >> shift) & 0x0f
-	if v < 15 {
-		n[idx] += 1 << shift
-	}
-}
-
 // reset divides all counters by two.
-func (n nybbles) reset() {
-	for i := range n {
-		n[i] = (n[i] >> 1) & 0x77
+func (c *countMinSketch) reset() {
+	for i, v := range c.counters {
+		if v != 0 {
+			c.counters[i] = (v >> 1) & 0x7777777777777777
+		}
 	}
 }
 
-func (n nybbles) clear() {
-	for i := range n {
-		n[i] = 0
+func (c *countMinSketch) position(h uint32) (idx uint32, off uint32) {
+	idx = (h >> 2) & c.mask
+	off = (h & 3) << 2
+	return
+}
+
+// inc increases value at index idx.
+func (c *countMinSketch) inc(idx, off uint32) {
+	v := c.counters[idx]
+	count := uint8(v>>off) & 0x0F
+	if count < 15 {
+		c.counters[idx] = v + (1 << off)
+	}
+}
+
+// val returns value at index idx.
+func (c *countMinSketch) val(idx, off uint32) uint8 {
+	v := c.counters[idx]
+	return uint8(v>>off) & 0x0F
+}
+
+func (c *countMinSketch) clear() {
+	for i := range c.counters {
+		c.counters[i] = 0
 	}
 }
 

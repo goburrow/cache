@@ -2,51 +2,52 @@ package cache
 
 import "testing"
 
-func TestNybbles(t *testing.T) {
-	var size uint32 = 8
-	var i uint32
-	n := newNybbles(size)
-	for i = 0; i < size; i++ {
+func TestCountMinSketch(t *testing.T) {
+	const max = 15
+	cm := &countMinSketch{}
+	cm.init(max)
+	for i := 0; i < max; i++ {
 		// Increase value at i j times
 		for j := i; j > 0; j-- {
-			n.inc(i)
+			cm.add(uint64(i))
 		}
 	}
-	for i = 0; i < size; i++ {
-		assertNybble(t, n, i, byte(i))
+	for i := 0; i < max; i++ {
+		n := cm.estimate(uint64(i))
+		if int(n) != i {
+			t.Fatalf("unexpected estimate(%d): %d, want: %d", i, n, i)
+		}
 	}
-	for i = 0; i < 100; i++ {
-		n.inc(1)
+	cm.reset()
+	for i := 0; i < max; i++ {
+		n := cm.estimate(uint64(i))
+		if int(n) != i/2 {
+			t.Fatalf("unexpected estimate(%d): %d, want: %d", i, n, i/2)
+		}
 	}
-	assertNybble(t, n, 1, 15)
-	assertNybble(t, n, 0, 0)
-
-	n.reset()
-	assertNybble(t, n, 1, 7)
-	assertNybble(t, n, 6, 3)
-
-	n.reset()
-	assertNybble(t, n, 6, 1)
-	assertNybble(t, n, 2, 0)
+	cm.reset()
+	for i := 0; i < max; i++ {
+		n := cm.estimate(uint64(i))
+		if int(n) != i/4 {
+			t.Fatalf("unexpected estimate(%d): %d, want: %d", i, n, i/4)
+		}
+	}
+	for i := 0; i < 100; i++ {
+		cm.add(1)
+	}
+	n := cm.estimate(1)
+	if n != 15 {
+		t.Fatalf("unexpected estimate(%d): %d, want: %d", 1, n, 15)
+	}
 }
 
-func assertNybble(t *testing.T, n nybbles, idx uint32, expect byte) {
-	v := n.get(idx)
-	if v != expect {
-		t.Fatalf("unexpected get(%d): 0x%x, want: %d", idx, v, expect)
-	}
-}
-
-func TestCountMinSketch(t *testing.T) {
+func BenchmarkCountMinSketchReset(b *testing.B) {
 	cm := &countMinSketch{}
-	cm.init(32)
-
-	h := uint64(0xdeadbeef)
-	cm.add(h)
-	cm.add(h)
-
-	n := cm.estimate(h)
-	if n != 2 {
-		t.Errorf("unexpected estimate: %d, want: %d", n, 2)
+	cm.init(1<<15 - 1)
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		cm.add(0xCAFECAFECAFECAFE)
+		cm.reset()
 	}
 }
