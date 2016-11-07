@@ -3,8 +3,10 @@ package cache
 import "container/list"
 
 const (
+	samplesMultiplier        = 8
+	insertionsMultiplier     = 2
+	countersMultiplier       = 1
 	falsePositiveProbability = 0.1
-	countResetInterval       = 16
 	admissionRatio           = 0.01
 )
 
@@ -23,9 +25,12 @@ type tinyLFU struct {
 }
 
 func (l *tinyLFU) init(c *cache, cap int) {
-	l.samples = cap
-	l.filter.init(cap, falsePositiveProbability)
-	l.counter.init(cap)
+	if cap > 0 {
+		// Only enable doorkeeper when capacity is finite.
+		l.samples = samplesMultiplier * cap
+		l.filter.init(insertionsMultiplier*cap, falsePositiveProbability)
+		l.counter.init(countersMultiplier * cap)
+	}
 	lruCap := int(float64(cap) * admissionRatio)
 	l.lru.init(c, lruCap)
 	l.slru.init(c, cap-lruCap)
@@ -73,12 +78,13 @@ func (l *tinyLFU) remove(el *list.Element) *entry {
 
 // increase adds the given hash to the filter and counter.
 func (l *tinyLFU) increase(h uint64) {
-	l.additions++
-	if l.additions%countResetInterval == 0 {
-		l.counter.reset()
+	if l.samples <= 0 {
+		return
 	}
+	l.additions++
 	if l.additions >= l.samples {
 		l.filter.reset()
+		l.counter.reset()
 		l.additions = 0
 	}
 	if l.filter.put(h) {
