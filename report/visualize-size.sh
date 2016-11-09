@@ -1,9 +1,6 @@
 #!/bin/bash
 FORMAT='svg size 400,300 font "Helvetica,10"'
 PLOTARG=""
-START=1
-STEP=10
-COUNT=1000
 
 for f in "$@"; do
 	if [ ! -z "$PLOTARG" ]; then
@@ -11,11 +8,12 @@ for f in "$@"; do
 	fi
 	NAME="$(basename "$f")"
 	NAME="${NAME%.*}"
-	PLOTARG="$PLOTARG '$f' every $STEP::$((START))::$((START+COUNT-1)) using 1:3 with lines title '$NAME'"
+	NAME="${NAME#*_}"
+	PLOTARG="$PLOTARG '$f' every ::1 using 5:3 with lines title '$NAME'"
 done
 
 ARG="set datafile separator ',';\
-	set xlabel 'Requests';\
+	set xlabel 'Cache Size';\
 	set xtics rotate by -45 offset -1;\
 	set ylabel 'Hit Rate';\
 	set yrange [0:];\

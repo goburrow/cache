@@ -5,24 +5,18 @@ import (
 	"testing"
 )
 
-func TestWikipediaLRU(t *testing.T) {
-	testWikipedia(t, "lru", "wikipedia-lru.txt")
+func TestRequestWikipedia(t *testing.T) {
+	for _, p := range policies {
+		testRequestWikipedia(t, p, "request_wikipedia-"+p+".txt")
+	}
 }
 
-func TestWikipediaSLRU(t *testing.T) {
-	testWikipedia(t, "slru", "wikipedia-slru.txt")
-}
-
-func TestWikipediaTinyLFU(t *testing.T) {
-	testWikipedia(t, "tinylfu", "wikipedia-tinylfu.txt")
-}
-
-func testWikipedia(t *testing.T, policy, reportFile string) {
+func testRequestWikipedia(t *testing.T, policy, reportFile string) {
 	traceFiles := "wiki.[1-9]*"
 	opt := options{
 		policy:         policy,
 		cacheSize:      512,
-		reportInterval: 1000,
+		reportInterval: 10000,
 		maxItems:       1000000,
 	}
 
@@ -40,4 +34,40 @@ func testWikipedia(t *testing.T, policy, reportFile string) {
 	defer w.Close()
 	reporter := NewReporter(w)
 	benchmarkCache(provider, reporter, opt)
+}
+
+func TestSizeWikipedia(t *testing.T) {
+	for _, p := range policies {
+		testSizeWikipedia(t, p, "size_wikipedia-"+p+".txt")
+	}
+}
+
+func testSizeWikipedia(t *testing.T, policy, reportFile string) {
+	traceFiles := "wiki.[1-9]*"
+	opt := options{
+		policy:   policy,
+		maxItems: 100000,
+	}
+
+	r, err := openFilesGlob(traceFiles)
+	if err != nil {
+		t.Skip(err)
+	}
+	defer r.Close()
+	w, err := os.Create(reportFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	reporter := NewReporter(w)
+
+	for i := 500; i <= 5000; i += 500 {
+		opt.cacheSize = i
+		provider := NewWikipediaProvider(r)
+		benchmarkCache(provider, reporter, opt)
+		err = r.Reset()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 }

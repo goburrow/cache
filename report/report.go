@@ -10,7 +10,7 @@ import (
 )
 
 type Reporter interface {
-	Report(cache.Stats)
+	Report(cache.Stats, options)
 }
 
 type Provider interface {
@@ -26,13 +26,14 @@ func NewReporter(w io.Writer) Reporter {
 	return &reporter{w: w}
 }
 
-func (r *reporter) Report(st cache.Stats) {
+func (r *reporter) Report(st cache.Stats, opt options) {
 	if !r.headerPrinted {
-		fmt.Fprintf(r.w, "Requets,Hits,HitRate,Evictions\n")
+		fmt.Fprintf(r.w, "Requets,Hits,HitRate,Evictions,CacheSize\n")
 		r.headerPrinted = true
 	}
-	fmt.Fprintf(r.w, "%d,%d,%.04f,%d\n",
-		st.RequestCount(), st.HitCount, st.HitRate(), st.EvictionCount)
+	fmt.Fprintf(r.w, "%d,%d,%.04f,%d,%d\n",
+		st.RequestCount(), st.HitCount, st.HitRate(), st.EvictionCount,
+		opt.cacheSize)
 }
 
 type options struct {
@@ -40,6 +41,12 @@ type options struct {
 	cacheSize      int
 	reportInterval int
 	maxItems       int
+}
+
+var policies = []string{
+	"lru",
+	"slru",
+	"tinylfu",
 }
 
 func benchmarkCache(p Provider, r Reporter, opt options) {
@@ -54,7 +61,7 @@ func benchmarkCache(p Provider, r Reporter, opt options) {
 	stats := cache.Stats{}
 	i := 0
 	for {
-		if opt.maxItems > 0 && i > opt.maxItems {
+		if opt.maxItems > 0 && i >= opt.maxItems {
 			break
 		}
 		k, ok := <-keys
@@ -68,12 +75,12 @@ func benchmarkCache(p Provider, r Reporter, opt options) {
 		i++
 		if opt.reportInterval > 0 && i%opt.reportInterval == 0 {
 			c.Stats(&stats)
-			r.Report(stats)
+			r.Report(stats, opt)
 		}
 	}
 	if opt.reportInterval == 0 {
 		c.Stats(&stats)
-		r.Report(stats)
+		r.Report(stats, opt)
 	}
 }
 
@@ -82,7 +89,7 @@ type filesReader struct {
 	files []*os.File
 }
 
-func openFilesGlob(pattern string) (io.ReadCloser, error) {
+func openFilesGlob(pattern string) (*filesReader, error) {
 	files, err := filepath.Glob(pattern)
 	if err != nil {
 		return nil, err
@@ -93,7 +100,7 @@ func openFilesGlob(pattern string) (io.ReadCloser, error) {
 	return openFiles(files...)
 }
 
-func openFiles(files ...string) (io.ReadCloser, error) {
+func openFiles(files ...string) (*filesReader, error) {
 	r := &filesReader{}
 	r.files = make([]*os.File, 0, len(files))
 	readers := make([]io.Reader, 0, len(files))
@@ -119,4 +126,17 @@ func (r *filesReader) Close() error {
 		}
 	}
 	return err
+}
+
+func (r *filesReader) Reset() error {
+	readers := make([]io.Reader, 0, len(r.files))
+	for _, f := range r.files {
+		_, err := f.Seek(0, 0)
+		if err != nil {
+			return err
+		}
+		readers = append(readers, f)
+	}
+	r.Reader = io.MultiReader(readers...)
+	return nil
 }

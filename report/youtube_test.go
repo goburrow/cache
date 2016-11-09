@@ -5,25 +5,19 @@ import (
 	"testing"
 )
 
-func TestYouTubeLRU(t *testing.T) {
-	testYouTube(t, "lru", "youtube-lru.txt")
+func TestRequestYouTube(t *testing.T) {
+	for _, p := range policies {
+		testRequestYouTube(t, p, "request_youtube-"+p+".txt")
+	}
 }
 
-func TestYouTubeSLRU(t *testing.T) {
-	testYouTube(t, "slru", "youtube-slru.txt")
-}
-
-func TestYouTubeTinyLFU(t *testing.T) {
-	testYouTube(t, "tinylfu", "youtube-tinylfu.txt")
-}
-
-func testYouTube(t *testing.T, policy, reportFile string) {
-	traceFiles := "youtube.parsed.*.dat"
+func testRequestYouTube(t *testing.T, policy, reportFile string) {
+	traceFiles := "youtube.parsed.0803*.dat"
 	opt := options{
 		policy:         policy,
-		cacheSize:      1024,
-		reportInterval: 1000,
-		maxItems:       2000000,
+		cacheSize:      512,
+		reportInterval: 2000,
+		maxItems:       200000,
 	}
 
 	r, err := openFilesGlob(traceFiles)
@@ -40,4 +34,40 @@ func testYouTube(t *testing.T, policy, reportFile string) {
 	defer w.Close()
 	reporter := NewReporter(w)
 	benchmarkCache(provider, reporter, opt)
+}
+
+func TestSizeYouTube(t *testing.T) {
+	for _, p := range policies {
+		testSizeYouTube(t, p, "size_youtube-"+p+".txt")
+	}
+}
+
+func testSizeYouTube(t *testing.T, policy, reportFile string) {
+	traceFiles := "youtube.parsed.0803*.dat"
+	opt := options{
+		policy:   policy,
+		maxItems: 100000,
+	}
+
+	r, err := openFilesGlob(traceFiles)
+	if err != nil {
+		t.Skip(err)
+	}
+	defer r.Close()
+	w, err := os.Create(reportFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	reporter := NewReporter(w)
+
+	for i := 500; i <= 5000; i += 500 {
+		opt.cacheSize = i
+		provider := NewYoutubeProvider(r)
+		benchmarkCache(provider, reporter, opt)
+		err = r.Reset()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 }

@@ -1,13 +1,17 @@
 #!/bin/sh
 set -e
-go test -v -run Wikipedia
-./visualize-hitrate.sh wikipedia-*.txt
-mv out.svg wikipedia.svg
 
-go test -v -run YouTube
-./visualize-hitrate.sh youtube-*.txt
-mv out.svg youtube.svg
+report() {
+	NAME="$1"
+	go test -v -run "$NAME"
 
-go test -v -run Zipf
-./visualize-hitrate.sh zipf-*.txt
-mv out.svg zipf.svg
+	NAME=$(echo "$NAME" | tr '[:upper:]' '[:lower:]')
+	./visualize-request.sh request_$NAME-*.txt
+	mv -v out.svg $NAME-requests.svg
+	./visualize-size.sh size_$NAME-*.txt
+	mv -v out.svg $NAME-cachesize.svg
+}
+
+report Wikipedia
+report YouTube
+report Zipf

@@ -5,27 +5,21 @@ import (
 	"testing"
 )
 
-func TestZipfLRU(t *testing.T) {
-	testZipf(t, "lru", "zipf-lru.txt")
+func TestRequestZipf(t *testing.T) {
+	for _, p := range policies {
+		testRequestZipf(t, p, "request_zipf-"+p+".txt")
+	}
 }
 
-func TestZipfSLRU(t *testing.T) {
-	testZipf(t, "slru", "zipf-slru.txt")
-}
-
-func TestZipfTinyLFU(t *testing.T) {
-	testZipf(t, "tinylfu", "zipf-tinylfu.txt")
-}
-
-func testZipf(t *testing.T, policy, reportFile string) {
+func testRequestZipf(t *testing.T, policy, reportFile string) {
 	opt := options{
 		policy:         policy,
 		cacheSize:      512,
 		reportInterval: 1000,
-		maxItems:       1000000,
+		maxItems:       100000,
 	}
 
-	provider := NewZipfProvider(1.1, opt.maxItems)
+	provider := NewZipfProvider(1.01, opt.maxItems)
 
 	w, err := os.Create(reportFile)
 	if err != nil {
@@ -34,4 +28,29 @@ func testZipf(t *testing.T, policy, reportFile string) {
 	defer w.Close()
 	reporter := NewReporter(w)
 	benchmarkCache(provider, reporter, opt)
+}
+
+func TestSizeZipf(t *testing.T) {
+	for _, p := range policies {
+		testSizeZipf(t, p, "size_zipf-"+p+".txt")
+	}
+}
+
+func testSizeZipf(t *testing.T, policy, reportFile string) {
+	opt := options{
+		policy:   policy,
+		maxItems: 100000,
+	}
+
+	w, err := os.Create(reportFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	reporter := NewReporter(w)
+	for i := 500; i <= 5000; i += 500 {
+		opt.cacheSize = i
+		provider := NewZipfProvider(1.01, opt.maxItems)
+		benchmarkCache(provider, reporter, opt)
+	}
 }
