@@ -7,17 +7,20 @@ import (
 	"strconv"
 )
 
-type umassProvider struct {
+type webSearchProvider struct {
 	r *bufio.Reader
 }
 
-func NewUMassProvider(r io.Reader) Provider {
-	return &umassProvider{
+// NewWebSearchProvider returns a Provider with items are from
+// the University of Massachusetts traces: Search Engine I/O
+// (http://traces.cs.umass.edu/index.php/Storage/Storage).
+func NewWebSearchProvider(r io.Reader) Provider {
+	return &webSearchProvider{
 		r: bufio.NewReader(r),
 	}
 }
 
-func (p *umassProvider) Provide(keys chan<- interface{}, done <-chan struct{}) {
+func (p *webSearchProvider) Provide(keys chan<- interface{}, done <-chan struct{}) {
 	defer close(keys)
 	for {
 		b, err := p.r.ReadBytes('\n')
@@ -42,7 +45,7 @@ func (p *umassProvider) Provide(keys chan<- interface{}, done <-chan struct{}) {
 	}
 }
 
-func (p *umassProvider) valid(cols [][]byte) bool {
+func (p *webSearchProvider) valid(cols [][]byte) bool {
 	if len(cols) < 4 {
 		return false
 	}
@@ -58,7 +61,7 @@ func (p *umassProvider) valid(cols [][]byte) bool {
 	return true
 }
 
-func (p *umassProvider) parse(cols [][]byte) (start, end uint64, err error) {
+func (p *webSearchProvider) parse(cols [][]byte) (start, end uint64, err error) {
 	const blockSize = 512
 
 	start, err = strconv.ParseUint(string(cols[1]), 10, 64)
