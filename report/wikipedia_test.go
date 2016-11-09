@@ -12,7 +12,7 @@ func TestRequestWikipedia(t *testing.T) {
 }
 
 func testRequestWikipedia(t *testing.T, policy, reportFile string) {
-	traceFiles := "wiki.[1-9]*"
+	traceFiles := "wiki.*.gz"
 	opt := options{
 		policy:         policy,
 		cacheSize:      512,
@@ -43,7 +43,7 @@ func TestSizeWikipedia(t *testing.T) {
 }
 
 func testSizeWikipedia(t *testing.T, policy, reportFile string) {
-	traceFiles := "wiki.[1-9]*"
+	traceFiles := "wiki.*.gz"
 	opt := options{
 		policy:   policy,
 		maxItems: 100000,

@@ -3,8 +3,6 @@ package report
 import (
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
 
 	"github.com/goburrow/cache"
 )
@@ -82,61 +80,4 @@ func benchmarkCache(p Provider, r Reporter, opt options) {
 		c.Stats(&stats)
 		r.Report(stats, opt)
 	}
-}
-
-type filesReader struct {
-	io.Reader
-	files []*os.File
-}
-
-func openFilesGlob(pattern string) (*filesReader, error) {
-	files, err := filepath.Glob(pattern)
-	if err != nil {
-		return nil, err
-	}
-	if len(files) == 0 {
-		return nil, fmt.Errorf("%s not found", pattern)
-	}
-	return openFiles(files...)
-}
-
-func openFiles(files ...string) (*filesReader, error) {
-	r := &filesReader{}
-	r.files = make([]*os.File, 0, len(files))
-	readers := make([]io.Reader, 0, len(files))
-	for _, file := range files {
-		f, err := os.Open(file)
-		if err != nil {
-			r.Close()
-			return nil, err
-		}
-		r.files = append(r.files, f)
-		readers = append(readers, f)
-	}
-	r.Reader = io.MultiReader(readers...)
-	return r, nil
-}
-
-func (r *filesReader) Close() error {
-	var err error
-	for _, f := range r.files {
-		e := f.Close()
-		if err != nil && e != nil {
-			err = e
-		}
-	}
-	return err
-}
-
-func (r *filesReader) Reset() error {
-	readers := make([]io.Reader, 0, len(r.files))
-	for _, f := range r.files {
-		_, err := f.Seek(0, 0)
-		if err != nil {
-			return err
-		}
-		readers = append(readers, f)
-	}
-	r.Reader = io.MultiReader(readers...)
-	return nil
 }
