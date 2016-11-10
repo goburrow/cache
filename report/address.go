@@ -3,6 +3,7 @@ package report
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"io"
 	"strconv"
 )
@@ -20,7 +21,7 @@ func NewAddressProvider(r io.Reader) Provider {
 	}
 }
 
-func (p *addressProvider) Provide(keys chan<- interface{}, done <-chan struct{}) {
+func (p *addressProvider) Provide(ctx context.Context, keys chan<- interface{}) {
 	defer close(keys)
 	for {
 		b, err := p.r.ReadBytes('\n')
@@ -30,7 +31,7 @@ func (p *addressProvider) Provide(keys chan<- interface{}, done <-chan struct{})
 		v := p.parse(b)
 		if v > 0 {
 			select {
-			case <-done:
+			case <-ctx.Done():
 				return
 			case keys <- v:
 			}

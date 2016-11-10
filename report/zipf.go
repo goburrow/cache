@@ -1,6 +1,9 @@
 package report
 
-import "math/rand"
+import (
+	"context"
+	"math/rand"
+)
 
 type zipfProvider struct {
 	r *rand.Zipf
@@ -18,12 +21,12 @@ func NewZipfProvider(s float64, num int) Provider {
 	}
 }
 
-func (p *zipfProvider) Provide(keys chan<- interface{}, done <-chan struct{}) {
+func (p *zipfProvider) Provide(ctx context.Context, keys chan<- interface{}) {
 	defer close(keys)
 	for i := 0; i < p.n; i++ {
 		v := p.r.Uint64()
 		select {
-		case <-done:
+		case <-ctx.Done():
 			return
 		case keys <- v:
 		}

@@ -3,6 +3,7 @@ package report
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"io"
 )
 
@@ -16,7 +17,7 @@ func NewWikipediaProvider(r io.Reader) Provider {
 	}
 }
 
-func (p *wikipediaProvider) Provide(keys chan<- interface{}, done <-chan struct{}) {
+func (p *wikipediaProvider) Provide(ctx context.Context, keys chan<- interface{}) {
 	defer close(keys)
 	for {
 		b, err := p.r.ReadBytes('\n')
@@ -26,7 +27,7 @@ func (p *wikipediaProvider) Provide(keys chan<- interface{}, done <-chan struct{
 		v := p.parse(b)
 		if v != "" {
 			select {
-			case <-done:
+			case <-ctx.Done():
 				return
 			case keys <- v:
 			}

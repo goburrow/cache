@@ -1,6 +1,7 @@
 package report
 
 import (
+	"context"
 	"fmt"
 	"io"
 
@@ -12,7 +13,7 @@ type Reporter interface {
 }
 
 type Provider interface {
-	Provide(keys chan<- interface{}, done <-chan struct{})
+	Provide(ctx context.Context, keys chan<- interface{})
 }
 
 type reporter struct {
@@ -52,10 +53,10 @@ func benchmarkCache(p Provider, r Reporter, opt options) {
 	defer c.Close()
 
 	keys := make(chan interface{}, 100)
-	done := make(chan struct{})
-	defer close(done)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-	go p.Provide(keys, done)
+	go p.Provide(ctx, keys)
 	stats := cache.Stats{}
 	i := 0
 	for {

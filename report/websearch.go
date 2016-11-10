@@ -3,6 +3,7 @@ package report
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"io"
 	"strconv"
 )
@@ -20,7 +21,7 @@ func NewWebSearchProvider(r io.Reader) Provider {
 	}
 }
 
-func (p *webSearchProvider) Provide(keys chan<- interface{}, done <-chan struct{}) {
+func (p *webSearchProvider) Provide(ctx context.Context, keys chan<- interface{}) {
 	defer close(keys)
 	for {
 		b, err := p.r.ReadBytes('\n')
@@ -37,7 +38,7 @@ func (p *webSearchProvider) Provide(keys chan<- interface{}, done <-chan struct{
 		}
 		for i := start; i < end; i++ {
 			select {
-			case <-done:
+			case <-ctx.Done():
 				return
 			case keys <- i:
 			}
