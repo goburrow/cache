@@ -16,6 +16,7 @@ report() {
 	done
 }
 
-report Wikipedia
-report YouTube
-report Zipf
+TRACES="Address Wikipedia YouTube Zipf"
+for TRACE in $TRACES; do
+	report $TRACE
+done
