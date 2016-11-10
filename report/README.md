@@ -2,22 +2,15 @@
 
 ```
 go test -v -run Wikipedia
-./visualize-hitrate.sh wikipedia-*.txt
+./visualize-request.sh request_wikipedia-*.txt
+./visualize-size.sh size_wikipedia-*.txt
 open out.svg
 ```
 
-## Wikipedia
+## Traces
 
-Trace files from [WikiBench](http://www.wikibench.eu/)
-
-![wikipedia](wikipedia.svg)
-
-## YouTube
-
-Trace files from [the University of Massachusetts](http://traces.cs.umass.edu/index.php/Network/Network)
-
-![youtube](youtube.svg)
-
-## Zipf
-
-![zipf](zipf.svg)
+Name         | Source
+------------ | ------
+Wikipedia    | [WikiBench](http://www.wikibench.eu/)
+YouTube      | [The University of Massachusetts](http://traces.cs.umass.edu/index.php/Network/Network)
+WebSearch    | [The University of Massachusetts](http://traces.cs.umass.edu/index.php/Storage/Storage)

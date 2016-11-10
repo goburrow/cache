@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 set -e
 
 report() {
@@ -7,9 +7,13 @@ report() {
 
 	NAME=$(echo "$NAME" | tr '[:upper:]' '[:lower:]')
 	./visualize-request.sh request_$NAME-*.txt
-	mv -v out.svg $NAME-requests.svg
+	for OUTPUT in out.*; do
+		mv -v "$OUTPUT" "$NAME-requests.${OUTPUT#*.}"
+	done
 	./visualize-size.sh size_$NAME-*.txt
-	mv -v out.svg $NAME-cachesize.svg
+	for OUTPUT in out.*; do
+		mv -v "$OUTPUT" "$NAME-cachesize.${OUTPUT#*.}"
+	done
 }
 
 report Wikipedia

@@ -64,9 +64,8 @@ func main() {
 }
 ```
 
-## Efficiency
+## Performance
 
 See [report](report/)
 
-![wikipedia](report/wikipedia.svg)
-![youtube](report/youtube.svg)
+![report](report/report.png)

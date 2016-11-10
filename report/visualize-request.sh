@@ -1,5 +1,7 @@
 #!/bin/bash
 FORMAT='svg size 400,300 font "Helvetica,10"'
+#FORMAT='png size 220,180 small noenhanced'
+OUTPUT="out.${FORMAT%% *}"
 PLOTARG=""
 
 for f in "$@"; do
@@ -14,15 +16,13 @@ done
 
 ARG="set datafile separator ',';\
 	set xlabel 'Requests';\
-	set xtics rotate by -45 offset -1;\
-	set ylabel 'Hit Rate';\
+	set xtics rotate by 45 right;\
+	set ylabel 'Hit Rate' offset 2;\
 	set yrange [0:];\
 	set key bottom right;\
 	set colors classic;\
 	set terminal $FORMAT;\
+	set output '$OUTPUT';\
 	plot $PLOTARG"
-if [ "$FORMAT" = "dumb" ]; then
-	gnuplot -e "$ARG"
-else
-	gnuplot -e "$ARG" > "out.${FORMAT%% *}"
-fi
+
+gnuplot -e "$ARG"
