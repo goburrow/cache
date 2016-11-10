@@ -16,7 +16,7 @@ report() {
 	done
 }
 
-TRACES="Address Wikipedia YouTube Zipf"
+TRACES="Address Financial WebSearch Wikipedia YouTube Zipf"
 for TRACE in $TRACES; do
 	report $TRACE
 done
