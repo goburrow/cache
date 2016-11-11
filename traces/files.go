@@ -1,4 +1,4 @@
-package report
+package traces
 
 import (
 	"compress/bzip2"

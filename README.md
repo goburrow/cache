@@ -66,6 +66,6 @@ func main() {
 
 ## Performance
 
-See [report](report/)
+See [traces](traces/)
 
-![report](report/report.png)
+![report](traces/report.png)
