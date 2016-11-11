@@ -1,6 +1,8 @@
 #!/bin/bash
-FORMAT='svg size 400,300 font "Helvetica,10"'
-#FORMAT='png size 220,180 small noenhanced'
+if [ -z "$FORMAT" ]; then
+	#FORMAT='svg size 400,300 font "Helvetica,10"'
+	FORMAT='png size 220,180 small noenhanced'
+fi
 OUTPUT="out.${FORMAT%% *}"
 PLOTARG=""
 

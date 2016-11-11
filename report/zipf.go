@@ -16,7 +16,7 @@ func NewZipfProvider(s float64, num int) Provider {
 	}
 	r := rand.New(rand.NewSource(1))
 	return &zipfProvider{
-		r: rand.NewZipf(r, s, 1.0, 1<<31-1),
+		r: rand.NewZipf(r, s, 1.0, 1<<16-1),
 		n: num,
 	}
 }
