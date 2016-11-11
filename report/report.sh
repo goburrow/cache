@@ -16,7 +16,7 @@ report() {
 	done
 }
 
-TRACES="Address Financial WebSearch Wikipedia YouTube Zipf"
+TRACES="Address CPP Multi2 ORMBusy Glimpse OLTP Sprite Financial WebSearch Wikipedia YouTube Zipf"
 for TRACE in $TRACES; do
 	report $TRACE
 done
