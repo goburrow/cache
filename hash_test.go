@@ -41,7 +41,7 @@ func TestSum(t *testing.T) {
 		{float32(2.5), sumFNVu64(0x40200000)},
 		{float64(2.5), sumFNVu64(0x4004000000000000)},
 		{uintptr(unsafe.Pointer(t)), sumFNVu64(uint64(uintptr(unsafe.Pointer(t))))},
-		{"", 0xcbf29ce484222325},
+		{"", sumFNV(nil)},
 		{"string", sumFNV([]byte("string"))},
 		{t, sumFNVu64(uint64(uintptr(unsafe.Pointer(t))))},
 		{(*testing.T)(nil), sumFNVu64(0)},
@@ -50,7 +50,7 @@ func TestSum(t *testing.T) {
 	for _, tt := range tests {
 		h := sum(tt.k)
 		if h != tt.h {
-			t.Errorf("unexpected hash: %v (0x%x), key: %v (%T), want: %v",
+			t.Errorf("unexpected hash: %v (0x%x), key: %+v (%T), want: %v",
 				h, h, tt.k, tt.k, tt.h)
 		}
 	}

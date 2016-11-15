@@ -67,8 +67,8 @@ const (
 func hashU64(v uint64) uint64 {
 	// Inline code from hash/fnv to reduce memory allocations
 	var h uint64 = fnvOffset
-	for i := uint(0); i < 8; i++ {
-		h ^= v >> (8 * i) & 0xFF
+	for i := uint(0); i < 64; i += 8 {
+		h ^= (v >> i) & 0xFF
 		h *= fnvPrime
 	}
 	return h
