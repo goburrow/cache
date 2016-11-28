@@ -48,14 +48,13 @@ type policy interface {
 
 func newPolicy(name string) policy {
 	switch name {
-	case "":
-		fallthrough
-	case "slru":
+	case "", "slru":
 		return &slruCache{}
 	case "lru":
 		return &lruCache{}
 	case "tinylfu":
 		return &tinyLFU{}
+	default:
+		panic("cache: unsupported policy " + name)
 	}
-	panic("cache: unsupported policy " + name)
 }
