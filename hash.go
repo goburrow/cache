@@ -13,10 +13,9 @@ type Hash interface {
 
 // sum calculates hash value of the given key.
 func sum(k interface{}) uint64 {
-	if h, ok := k.(Hash); ok {
-		return h.Sum64()
-	}
 	switch h := k.(type) {
+	case Hash:
+		return h.Sum64()
 	case int:
 		return hashU64(uint64(h))
 	case int8:
@@ -60,13 +59,13 @@ func sum(k interface{}) uint64 {
 }
 
 const (
-	fnvOffset = 14695981039346656037
-	fnvPrime  = 1099511628211
+	fnvOffset uint64 = 14695981039346656037
+	fnvPrime  uint64 = 1099511628211
 )
 
 func hashU64(v uint64) uint64 {
 	// Inline code from hash/fnv to reduce memory allocations
-	var h uint64 = fnvOffset
+	h := fnvOffset
 	for i := uint(0); i < 64; i += 8 {
 		h ^= (v >> i) & 0xFF
 		h *= fnvPrime
@@ -77,7 +76,7 @@ func hashU64(v uint64) uint64 {
 // hashBytes calculates hash value using FNV-1a algorithm.
 func hashBytes(data []byte) uint64 {
 	// Inline code from hash/fnv to reduce memory allocations
-	var h uint64 = fnvOffset
+	h := fnvOffset
 	for _, b := range data {
 		h ^= uint64(b)
 		h *= fnvPrime
@@ -90,6 +89,7 @@ func hashPointer(k interface{}) (uint64, bool) {
 	switch v.Kind() {
 	case reflect.Ptr, reflect.UnsafePointer, reflect.Func, reflect.Slice, reflect.Map, reflect.Chan:
 		return hashU64(uint64(v.Pointer())), true
+	default:
+		return 0, false
 	}
-	return 0, false
 }
