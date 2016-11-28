@@ -22,6 +22,7 @@ var currentTime = time.Now
 
 // localCache is an asynchronous LRU cache.
 type localCache struct {
+	// user configurations
 	policyName        string
 	expireAfterAccess time.Duration
 	refreshAfterWrite time.Duration
@@ -32,6 +33,7 @@ type localCache struct {
 	loader LoaderFunc
 	stats  StatsCounter
 
+	// internal data structure
 	cap   int
 	cache cache
 
@@ -43,6 +45,7 @@ type localCache struct {
 	// readCount is a counter of the number of reads since the last write.
 	readCount int32
 
+	// for closing routines created by this cache.
 	closeCh chan struct{}
 }
 
@@ -58,6 +61,7 @@ func newLocalCache() *localCache {
 	}
 }
 
+// init initializes cache replacement policy after all user configuration properties are set.
 func (c *localCache) init() {
 	c.entries = newPolicy(c.policyName)
 	c.entries.init(&c.cache, c.cap)
@@ -70,10 +74,15 @@ func (c *localCache) init() {
 	go c.processEntries()
 }
 
-// Close is for implementing io.Closer.
-// It always return nil error.
+// Close implements io.Closer and always returns a nil error.
 func (c *localCache) Close() error {
-	close(c.closeCh)
+	if c.closeCh != nil {
+		c.closeCh <- struct{}{}
+		// Wait for the goroutine to close this channel
+		// (should use sync.WaitGroup or a new channel instead?)
+		<-c.closeCh
+		c.closeCh = nil
+	}
 	return nil
 }
 
@@ -155,6 +164,7 @@ func (c *localCache) Stats(t *Stats) {
 }
 
 func (c *localCache) processEntries() {
+	defer close(c.closeCh)
 	for {
 		select {
 		case <-c.closeCh:

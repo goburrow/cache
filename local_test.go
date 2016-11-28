@@ -51,16 +51,18 @@ func TestMaximumSize(t *testing.T) {
 		c.Put(i, i)
 	}
 	wg.Wait()
-	if len(c.cache.data) != max {
-		t.Fatalf("unexpected cache size: %v, want: %v", len(c.cache.data), max)
+	n := cacheSize(&c.cache)
+	if n != max {
+		t.Fatalf("unexpected cache size: %v, want: %v", n, max)
 	}
 	c.onInsertion = nil
 	for i := 0; i < 2*max; i++ {
 		k := rand.Intn(2 * max)
 		c.Put(k, k)
 		time.Sleep(time.Duration(i+1) * time.Millisecond)
-		if len(c.cache.data) != max {
-			t.Fatalf("unexpected cache size: %v, want: %v", len(c.cache.data), max)
+		n = cacheSize(&c.cache)
+		if n != max {
+			t.Fatalf("unexpected cache size: %v, want: %v", n, max)
 		}
 	}
 }
@@ -209,36 +211,42 @@ func TestCacheStats(t *testing.T) {
 
 func TestExpireAfterAccess(t *testing.T) {
 	wg := sync.WaitGroup{}
-	insFunc := func(Key, Value) {
+	fn := func(k Key, v Value) {
 		wg.Done()
 	}
-	now := time.Now()
-	currentTime = func() time.Time {
-		return now
-	}
-	c := NewLoadingCache(simpleLoader, WithExpireAfterAccess(1*time.Second),
-		withInsertionListener(insFunc)).(*localCache)
+	mockTime := newMockTime()
+	currentTime = mockTime.now
+	c := New(WithExpireAfterAccess(1*time.Second), WithRemovalListener(fn),
+		withInsertionListener(fn)).(*localCache)
 	defer c.Close()
 
 	wg.Add(1)
-	_, err := c.Get("x")
-	if err != nil {
-		t.Fatal(err)
-	}
+	c.Put(1, 1)
 	wg.Wait()
-	currentTime = func() time.Time {
-		return now.Add(1 * time.Second)
+
+	mockTime.add(1 * time.Second)
+	wg.Add(2)
+	c.Put(2, 2)
+	c.Put(3, 3)
+	wg.Wait()
+	n := cacheSize(&c.cache)
+	if n != 3 {
+		wg.Add(n)
+		t.Fatalf("unexpected cache size: %d, want: %d", n, 3)
 	}
-	c.expireEntries()
-	if len(c.cache.data) != 1 {
-		t.Fatalf("unexpected cache size: %v, want: %v", len(c.cache.data), 1)
+
+	mockTime.add(1 * time.Nanosecond)
+	wg.Add(2)
+	c.Put(4, 4)
+	wg.Wait()
+	n = cacheSize(&c.cache)
+	wg.Add(n)
+	if n != 3 {
+		t.Fatalf("unexpected cache size: %d, want: %d", n, 3)
 	}
-	currentTime = func() time.Time {
-		return now.Add(1*time.Second + 1)
-	}
-	c.expireEntries()
-	if len(c.cache.data) != 0 {
-		t.Fatalf("unexpected cache size: %v, want: %v", len(c.cache.data), 0)
+	_, ok := c.GetIfPresent(1)
+	if ok {
+		t.Fatalf("unexpected entry status: %v, want: %v", ok, false)
 	}
 }
 
@@ -252,10 +260,8 @@ func TestRefreshAfterWrite(t *testing.T) {
 	insFunc := func(Key, Value) {
 		wg.Done()
 	}
-	now := time.Now()
-	currentTime = func() time.Time {
-		return now
-	}
+	mockTime := newMockTime()
+	currentTime = mockTime.now
 	c := NewLoadingCache(loader, WithRefreshAfterWrite(1*time.Second),
 		withInsertionListener(insFunc))
 	defer c.Close()
@@ -270,9 +276,7 @@ func TestRefreshAfterWrite(t *testing.T) {
 		t.Fatalf("unexpected load count: %v, %v", v, loadCount)
 	}
 
-	currentTime = func() time.Time {
-		return now.Add(1 * time.Second)
-	}
+	mockTime.add(1 * time.Second)
 	v, err = c.Get("refresh")
 	if err != nil {
 		t.Fatal(err)
@@ -281,9 +285,7 @@ func TestRefreshAfterWrite(t *testing.T) {
 		t.Fatalf("unexpected load count: %v, %v", v, loadCount)
 	}
 
-	currentTime = func() time.Time {
-		return now.Add(1*time.Second + 1)
-	}
+	mockTime.add(1 * time.Nanosecond)
 	wg.Add(1)
 	v, err = c.Get("refresh")
 	if err != nil {
@@ -293,4 +295,34 @@ func TestRefreshAfterWrite(t *testing.T) {
 	if v.(int) != 2 || loadCount != 2 {
 		t.Fatalf("unexpected load count: %v, %v", v, loadCount)
 	}
+}
+
+func cacheSize(c *cache) int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return len(c.data)
+}
+
+// mockTime is used for tests which required current system time.
+type mockTime struct {
+	mu    sync.RWMutex
+	value time.Time
+}
+
+func newMockTime() *mockTime {
+	return &mockTime{
+		value: time.Now(),
+	}
+}
+
+func (t *mockTime) add(d time.Duration) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.value = t.value.Add(d)
+}
+
+func (t *mockTime) now() time.Time {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.value
 }
