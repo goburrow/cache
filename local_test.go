@@ -297,6 +297,23 @@ func TestRefreshAfterWrite(t *testing.T) {
 	}
 }
 
+func TestDoubleClose(t *testing.T) {
+	c := New()
+	start := make(chan bool)
+	const n = 10
+	var wg sync.WaitGroup
+	wg.Add(n)
+	for i := 0; i < n; i++ {
+		go func() {
+			defer wg.Done()
+			<-start
+			c.Close()
+		}()
+	}
+	close(start)
+	wg.Wait()
+}
+
 func cacheSize(c *cache) int {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
