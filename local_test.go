@@ -250,7 +250,7 @@ func TestExpireAfterAccess(t *testing.T) {
 	}
 }
 
-func TestRefreshAfterWrite(t *testing.T) {
+func TestExpireAfterWrite(t *testing.T) {
 	loadCount := 0
 	loader := func(k Key) (Value, error) {
 		loadCount++
@@ -262,7 +262,7 @@ func TestRefreshAfterWrite(t *testing.T) {
 	}
 	mockTime := newMockTime()
 	currentTime = mockTime.now
-	c := NewLoadingCache(loader, WithRefreshAfterWrite(1*time.Second),
+	c := NewLoadingCache(loader, WithExpireAfterWrite(1*time.Second),
 		withInsertionListener(insFunc))
 	defer c.Close()
 
