@@ -2,6 +2,7 @@ package cache
 
 import (
 	"container/list"
+	"context"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -32,7 +33,7 @@ type localCache struct {
 	onInsertion Func
 	onRemoval   Func
 
-	loader LoaderFunc
+	loader LoaderFuncContext
 	stats  StatsCounter
 
 	// internal data structure
@@ -150,18 +151,25 @@ func (c *localCache) InvalidateAll() {
 // if it is not in the cache. The returned value is only cached when loader returns
 // nil error.
 func (c *localCache) Get(k Key) (Value, error) {
+	return c.GetContext(context.Background(), k)
+}
+
+// GetContext returns value associated with k or call underlying loader to retrieve value
+// if it is not in the cache. The returned value is only cached when loader returns
+// nil error.
+func (c *localCache) GetContext(ctx context.Context, k Key) (Value, error) {
 	c.cache.mu.RLock()
 	el, hit := c.cache.data[k]
 	c.cache.mu.RUnlock()
 	if !hit {
 		c.stats.RecordMisses(1)
-		return c.load(k)
+		return c.load(ctx, k)
 	}
 	en := getEntry(el)
 	// Check if this entry needs to be refreshed
 	if c.isExpired(en, currentTime()) {
 		c.stats.RecordMisses(1)
-		return c.refresh(en), nil
+		return c.refresh(ctx, en), nil
 	}
 	c.stats.RecordHits(1)
 	v := en.value
@@ -249,12 +257,12 @@ func (c *localCache) hit(el *list.Element) {
 
 // load uses current loader to retrieve value for k and adds new
 // entry to the cache only if loader returns a nil error.
-func (c *localCache) load(k Key) (Value, error) {
+func (c *localCache) load(ctx context.Context, k Key) (Value, error) {
 	if c.loader == nil {
 		panic("loader must be set")
 	}
 	start := currentTime()
-	v, err := c.loader(k)
+	v, err := c.loader(ctx, k)
 	loadTime := currentTime().Sub(start)
 	if err != nil {
 		c.stats.RecordLoadError(loadTime)
@@ -274,12 +282,12 @@ func (c *localCache) load(k Key) (Value, error) {
 // that error will be omitted and current value will be returned.
 // Otherwise, the function will returns new value and updates the current
 // cache entry.
-func (c *localCache) refresh(en *entry) Value {
+func (c *localCache) refresh(ctx context.Context, en *entry) Value {
 	if c.loader == nil {
 		panic("loader must be set")
 	}
 	start := currentTime()
-	newV, err := c.loader(en.key)
+	newV, err := c.loader(ctx, en.key)
 	loadTime := currentTime().Sub(start)
 	if err != nil {
 		c.stats.RecordLoadError(loadTime)
@@ -352,7 +360,7 @@ func New(options ...Option) Cache {
 
 // NewLoadingCache returns a new LoadingCache with given loader function
 // and cache options.
-func NewLoadingCache(loader LoaderFunc, options ...Option) LoadingCache {
+func NewLoadingCacheContext(loader LoaderFuncContext, options ...Option) LoadingCache {
 	c := newLocalCache()
 	c.loader = loader
 	for _, opt := range options {
@@ -360,6 +368,16 @@ func NewLoadingCache(loader LoaderFunc, options ...Option) LoadingCache {
 	}
 	c.init()
 	return c
+}
+
+// NewLoadingCache returns a new LoadingCache with given loader function
+// and cache options.
+func NewLoadingCache(loader LoaderFunc, options ...Option) LoadingCache {
+	return NewLoadingCacheContext(
+		func(_ context.Context, key Key) (Value, error) {
+			return loader(key)
+		}, options...,
+	)
 }
 
 // Option add options for default Cache.
