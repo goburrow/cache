@@ -292,6 +292,15 @@ func TestExpireAfterWrite(t *testing.T) {
 		t.Fatal(err)
 	}
 	wg.Wait()
+	if v.(int) != 1 || loadCount != 2 {
+		t.Fatalf("unexpected load count: %v, %v", v, loadCount)
+	}
+
+	mockTime.add(1 * time.Nanosecond)
+	v, err = c.Get("refresh")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if v.(int) != 2 || loadCount != 2 {
 		t.Fatalf("unexpected load count: %v, %v", v, loadCount)
 	}
