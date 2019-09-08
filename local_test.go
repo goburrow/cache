@@ -292,6 +292,53 @@ func TestExpireAfterWrite(t *testing.T) {
 		t.Fatal(err)
 	}
 	wg.Wait()
+	if v.(int) != 2 || loadCount != 2 {
+		t.Fatalf("unexpected load count: %v, %v", v, loadCount)
+	}
+}
+
+func TestExpireAfterWriteAsync(t *testing.T) {
+	loadCount := 0
+	loader := func(k Key) (Value, error) {
+		loadCount++
+		return loadCount, nil
+	}
+	wg := sync.WaitGroup{}
+	insFunc := func(Key, Value) {
+		wg.Done()
+	}
+	mockTime := newMockTime()
+	currentTime = mockTime.now
+	c := NewLoadingCache(loader, WithExpireAfterWrite(1*time.Second),
+		withInsertionListener(insFunc), withAsyncRefresh(true))
+	defer c.Close()
+
+	wg.Add(1)
+	v, err := c.Get("refresh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wg.Wait()
+	if v.(int) != 1 || loadCount != 1 {
+		t.Fatalf("unexpected load count: %v, %v", v, loadCount)
+	}
+
+	mockTime.add(1 * time.Second)
+	v, err = c.Get("refresh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.(int) != 1 || loadCount != 1 {
+		t.Fatalf("unexpected load count: %v, %v", v, loadCount)
+	}
+
+	mockTime.add(1 * time.Nanosecond)
+	wg.Add(1)
+	v, err = c.Get("refresh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wg.Wait()
 	if v.(int) != 1 || loadCount != 2 {
 		t.Fatalf("unexpected load count: %v, %v", v, loadCount)
 	}
