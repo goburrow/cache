@@ -50,6 +50,9 @@ type localCache struct {
 	// for closing routines created by this cache.
 	closeMu sync.Mutex
 	closeCh chan struct{}
+
+	// flag to switch into async refresh
+	asyncRefresh bool
 }
 
 // newLocalCache returns a default localCache.
@@ -161,8 +164,11 @@ func (c *localCache) Get(k Key) (Value, error) {
 	// Check if this entry needs to be refreshed
 	if c.isExpired(en, currentTime()) {
 		c.stats.RecordMisses(1)
-		go c.refresh(en)
-		return en.value, nil
+		if c.asyncRefresh {
+			go c.refresh(en)
+			return en.value, nil
+		}
+		return c.refresh(en), nil
 	}
 	c.stats.RecordHits(1)
 	v := en.value
@@ -431,5 +437,13 @@ func WithPolicy(name string) Option {
 func withInsertionListener(onInsertion Func) Option {
 	return func(c *localCache) {
 		c.onInsertion = onInsertion
+	}
+}
+
+// withAsyncRefresh refresh a cache entry asynchronously after
+//// given duration. This option is only applicable for LoadingCache.
+func withAsyncRefresh(asyncRefresh bool) Option {
+	return func(c *localCache) {
+		c.asyncRefresh = asyncRefresh
 	}
 }
