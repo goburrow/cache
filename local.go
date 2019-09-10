@@ -442,7 +442,7 @@ func withInsertionListener(onInsertion Func) Option {
 
 // withAsyncRefresh refresh a cache entry asynchronously after
 //// given duration. This option is only applicable for LoadingCache.
-func withAsyncRefresh(asyncRefresh bool) Option {
+func WithAsyncRefresh(asyncRefresh bool) Option {
 	return func(c *localCache) {
 		c.asyncRefresh = asyncRefresh
 	}
