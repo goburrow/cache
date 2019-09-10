@@ -310,7 +310,7 @@ func TestExpireAfterWriteAsync(t *testing.T) {
 	mockTime := newMockTime()
 	currentTime = mockTime.now
 	c := NewLoadingCache(loader, WithExpireAfterWrite(1*time.Second),
-		withInsertionListener(insFunc), withAsyncRefresh(true))
+		withInsertionListener(insFunc), WithAsyncRefresh(true))
 	defer c.Close()
 
 	wg.Add(1)
