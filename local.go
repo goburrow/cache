@@ -162,7 +162,7 @@ func (c *localCache) Get(k Key) (Value, error) {
 	}
 	en := getEntry(el)
 	// Check if this entry needs to be refreshed
-	if c.isExpired(en, currentTime()) {
+	if c.isExpired(en, currentTime()) || c.isRefreshRequired(en, currentTime()) {
 		c.stats.RecordMisses(1)
 		if c.asyncRefresh{
 			canRefresh := en.lockEntry()
@@ -348,6 +348,13 @@ func (c *localCache) isExpired(en *entry, now time.Time) bool {
 		return true
 	}
 	if c.expireAfterWrite > 0 && en.updated.Before(now.Add(-c.expireAfterWrite)) {
+		return true
+	}
+	return false
+}
+
+func (c *localCache) isRefreshRequired(en *entry, now time.Time) bool {
+	if c.refreshAfterWrite > 0 && en.accessed.Before(now.Add(-c.refreshAfterWrite)) {
 		return true
 	}
 	return false
