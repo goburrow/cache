@@ -19,6 +19,24 @@ type entry struct {
 	listID listID
 	// hash is the hash value of this entry key
 	hash uint64
+
+	// only one goroutine to refresh entry
+	refreshMu sync.Mutex
+	refreshing bool
+}
+
+func (en *entry) lockEntry() bool {
+	en.refreshMu.Lock()
+	canRefresh := !en.refreshing
+	en.refreshing = true
+	en.refreshMu.Unlock()
+	return canRefresh
+}
+
+func (en *entry) unlockEntry()  {
+	en.refreshMu.Lock()
+	en.refreshing = false
+	en.refreshMu.Unlock()
 }
 
 // getEntry returns the entry attached to the given list element.
