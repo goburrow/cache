@@ -164,8 +164,14 @@ func (c *localCache) Get(k Key) (Value, error) {
 	// Check if this entry needs to be refreshed
 	if c.isExpired(en, currentTime()) {
 		c.stats.RecordMisses(1)
-		if c.asyncRefresh {
-			go c.refresh(en)
+		if c.asyncRefresh{
+			canRefresh := en.lockEntry()
+			if canRefresh {
+				go func() {
+					c.refresh(en)
+					en.unlockEntry()
+				}()
+			}
 			return en.value, nil
 		}
 		return c.refresh(en), nil
