@@ -16,6 +16,10 @@ const (
 	drainMax = 16
 	// Number of cache access operations that will trigger clean up.
 	drainThreshold = 64
+	// Default worker for processing entries.
+	defaultWorker = 1
+	// Default channel size
+	defaultChannelSize = 1
 )
 
 // currentTime is an alias for time.Now, used for testing.
@@ -41,6 +45,7 @@ type localCache struct {
 
 	entries     policy
 	addEntry    chan *entry
+	refreshEntry chan *entry
 	hitEntry    chan *list.Element
 	deleteEntry chan *list.Element
 
@@ -52,14 +57,18 @@ type localCache struct {
 	closeCh chan struct{}
 
 	// flag to switch into async refresh
-	asyncRefresh bool
+	asyncRefresh      bool
+	worker            int
+	refreshChannelCap int
 }
 
 // newLocalCache returns a default localCache.
 // init must be called before this cache can be used.
 func newLocalCache() *localCache {
 	return &localCache{
-		cap: maximumCapacity,
+		worker:            defaultWorker,
+		refreshChannelCap: defaultChannelSize,
+		cap:               maximumCapacity,
 		cache: cache{
 			data: make(map[Key]*list.Element),
 		},
@@ -73,11 +82,15 @@ func (c *localCache) init() {
 	c.entries.init(&c.cache, c.cap)
 
 	c.addEntry = make(chan *entry, chanBufSize)
+	c.refreshEntry = make(chan *entry, c.refreshChannelCap)
 	c.hitEntry = make(chan *list.Element, chanBufSize)
 	c.deleteEntry = make(chan *list.Element, chanBufSize)
 
 	c.closeCh = make(chan struct{})
-	go c.processEntries()
+	for i := 0; i < c.worker; i++ {
+		go c.processEntries()
+		go c.processRefresh()
+	}
 }
 
 // Close implements io.Closer and always returns a nil error.
@@ -165,13 +178,7 @@ func (c *localCache) Get(k Key) (Value, error) {
 	if c.isExpired(en, currentTime()) || c.isRefreshRequired(en, currentTime()) {
 		c.stats.RecordMisses(1)
 		if c.asyncRefresh{
-			canRefresh := en.lockEntry()
-			if canRefresh {
-				go func() {
-					c.refresh(en)
-					en.unlockEntry()
-				}()
-			}
+			c.refreshEntry <- en
 			return en.value, nil
 		}
 		return c.refresh(en), nil
@@ -207,6 +214,18 @@ func (c *localCache) processEntries() {
 				c.remove(el)
 			}
 			c.postReadCleanup()
+		}
+	}
+}
+
+func (c *localCache) processRefresh()  {
+	defer close(c.closeCh)
+	for  {
+		select {
+		case <-c.closeCh:
+			return
+		case en := <-c.refreshEntry:
+			c.refresh(en)
 		}
 	}
 }
@@ -292,6 +311,7 @@ func (c *localCache) refresh(en *entry) Value {
 		panic("loader must be set")
 	}
 	start := currentTime()
+	en.accessed = start
 	newV, err := c.loader(en.key)
 	loadTime := currentTime().Sub(start)
 	if err != nil {
@@ -458,5 +478,21 @@ func withInsertionListener(onInsertion Func) Option {
 func WithAsyncRefresh(asyncRefresh bool) Option {
 	return func(c *localCache) {
 		c.asyncRefresh = asyncRefresh
+	}
+}
+
+// withProcessWorker set number of worker goroutine to run for
+//// processing cache entry add, remove, refresh.
+func WithProcessWorker(worker int) Option {
+	return func(c *localCache) {
+		c.worker = worker
+	}
+}
+
+// WithRefreshQueueSize set refresh channel buffer size to which refresh worker
+//// listens.
+func WithRefreshQueueSize(queueCap int) Option {
+	return func(c *localCache) {
+		c.refreshChannelCap = queueCap
 	}
 }
