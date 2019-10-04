@@ -101,12 +101,19 @@ func (c *localCache) Close() error {
 	if c.closeCh != nil {
 		for i := 0; i < c.workerCap; i++ {
 			c.closeCh <- struct{}{}
-			c.closeRefreshCh <- struct{}{}
-			// Wait for the goroutine to close this channel
+			// Wait for the goroutines to close this channel
 			// (should use sync.WaitGroup or a new channel instead?)
-			<-c.closeRefreshCh
 			<-c.closeCh
 			c.closeCh = nil
+		}
+	}
+
+	if c.closeRefreshCh != nil {
+		for i := 0; i < c.workerCap; i++ {
+			c.closeRefreshCh <- struct{}{}
+			// Wait for the goroutines to close this channel
+			// (should use sync.WaitGroup or a new channel instead?)
+			<-c.closeRefreshCh
 			c.closeRefreshCh = nil
 		}
 	}
@@ -225,10 +232,11 @@ func (c *localCache) processEntries() {
 }
 
 func (c *localCache) processRefresh() {
-	defer close(c.closeCh)
+	defer close(c.closeRefreshCh)
 	for {
 		select {
-		case <-c.closeCh:
+		case <-c.closeRefreshCh:
+			c.removeAll()
 			return
 		case en := <-c.refreshEntry:
 			c.refresh(en)
