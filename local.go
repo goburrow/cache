@@ -16,10 +16,10 @@ const (
 	drainMax = 16
 	// Number of cache access operations that will trigger clean up.
 	drainThreshold = 64
-	// Default worker for processing entries.
-	defaultWorker = 1
+	// Default workerCap for processing entries.
+	defaultWorkerCap = 1
 	// Default channel size
-	defaultChannelSize = 1
+	defaultChannelCap = 1
 )
 
 // currentTime is an alias for time.Now, used for testing.
@@ -55,10 +55,11 @@ type localCache struct {
 	// for closing routines created by this cache.
 	closeMu sync.Mutex
 	closeCh chan struct{}
+	closeRefreshCh chan struct{}
 
 	// flag to switch into async refresh
 	asyncRefresh      bool
-	worker            int
+	workerCap         int
 	refreshChannelCap int
 }
 
@@ -66,8 +67,8 @@ type localCache struct {
 // init must be called before this cache can be used.
 func newLocalCache() *localCache {
 	return &localCache{
-		worker:            defaultWorker,
-		refreshChannelCap: defaultChannelSize,
+		workerCap:         defaultWorkerCap,
+		refreshChannelCap: defaultChannelCap,
 		cap:               maximumCapacity,
 		cache: cache{
 			data: make(map[Key]*list.Element),
@@ -87,7 +88,7 @@ func (c *localCache) init() {
 	c.deleteEntry = make(chan *list.Element, chanBufSize)
 
 	c.closeCh = make(chan struct{})
-	for i := 0; i < c.worker; i++ {
+	for i := 0; i < c.workerCap; i++ {
 		go c.processEntries()
 		go c.processRefresh()
 	}
@@ -98,11 +99,16 @@ func (c *localCache) Close() error {
 	c.closeMu.Lock()
 	defer c.closeMu.Unlock()
 	if c.closeCh != nil {
-		c.closeCh <- struct{}{}
-		// Wait for the goroutine to close this channel
-		// (should use sync.WaitGroup or a new channel instead?)
-		<-c.closeCh
-		c.closeCh = nil
+		for i := 0; i < c.workerCap ; i++ {
+			c.closeCh <- struct{}{}
+			c.closeRefreshCh <- struct{}{}
+			// Wait for the goroutine to close this channel
+			// (should use sync.WaitGroup or a new channel instead?)
+			<-c.closeRefreshCh
+			<-c.closeCh
+			c.closeCh = nil
+			c.closeRefreshCh = nil
+		}
 	}
 	return nil
 }
@@ -481,18 +487,18 @@ func WithAsyncRefresh(asyncRefresh bool) Option {
 	}
 }
 
-// withProcessWorker set number of worker goroutine to run for
+// withProcessWorker set number of workerCap goroutine to run for
 //// processing cache entry add, remove, refresh.
 func WithProcessWorker(worker int) Option {
 	return func(c *localCache) {
-		c.worker = worker
+		c.workerCap = worker
 	}
 }
 
-// WithRefreshQueueSize set refresh channel buffer size to which refresh worker
+// WithRefreshQueueSize set refresh channel buffer size to which refresh workerCap
 //// listens.
-func WithRefreshQueueSize(queueCap int) Option {
+func WithRefreshQueueSize(channelCap int) Option {
 	return func(c *localCache) {
-		c.refreshChannelCap = queueCap
+		c.refreshChannelCap = channelCap
 	}
 }
