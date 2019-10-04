@@ -43,18 +43,18 @@ type localCache struct {
 	cap   int
 	cache cache
 
-	entries     policy
-	addEntry    chan *entry
+	entries      policy
+	addEntry     chan *entry
 	refreshEntry chan *entry
-	hitEntry    chan *list.Element
-	deleteEntry chan *list.Element
+	hitEntry     chan *list.Element
+	deleteEntry  chan *list.Element
 
 	// readCount is a counter of the number of reads since the last write.
 	readCount int32
 
 	// for closing routines created by this cache.
-	closeMu sync.Mutex
-	closeCh chan struct{}
+	closeMu        sync.Mutex
+	closeCh        chan struct{}
 	closeRefreshCh chan struct{}
 
 	// flag to switch into async refresh
@@ -99,7 +99,7 @@ func (c *localCache) Close() error {
 	c.closeMu.Lock()
 	defer c.closeMu.Unlock()
 	if c.closeCh != nil {
-		for i := 0; i < c.workerCap ; i++ {
+		for i := 0; i < c.workerCap; i++ {
 			c.closeCh <- struct{}{}
 			c.closeRefreshCh <- struct{}{}
 			// Wait for the goroutine to close this channel
@@ -183,7 +183,7 @@ func (c *localCache) Get(k Key) (Value, error) {
 	// Check if this entry needs to be refreshed
 	if c.isExpired(en, currentTime()) || c.isRefreshRequired(en, currentTime()) {
 		c.stats.RecordMisses(1)
-		if c.asyncRefresh{
+		if c.asyncRefresh {
 			c.refreshEntry <- en
 			return en.value, nil
 		}
@@ -224,9 +224,9 @@ func (c *localCache) processEntries() {
 	}
 }
 
-func (c *localCache) processRefresh()  {
+func (c *localCache) processRefresh() {
 	defer close(c.closeCh)
-	for  {
+	for {
 		select {
 		case <-c.closeCh:
 			return
