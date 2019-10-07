@@ -82,7 +82,7 @@ func (c *localCache) init() {
 	c.entries = newPolicy(c.policyName)
 	c.entries.init(&c.cache, c.cap)
 
-	c.addEntry = make(chan *entry, chanBufSize)
+	c.addEntry = make(chan *entry, c.refreshChannelCap)
 	c.refreshEntry = make(chan *entry, c.refreshChannelCap)
 	c.hitEntry = make(chan *list.Element, chanBufSize)
 	c.deleteEntry = make(chan *list.Element, chanBufSize)
