@@ -19,6 +19,7 @@ type entry struct {
 	listID listID
 	// hash is the hash value of this entry key
 	hash uint64
+
 }
 
 // getEntry returns the entry attached to the given list element.
