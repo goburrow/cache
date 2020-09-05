@@ -1,7 +1,5 @@
 package cache
 
-import "container/list"
-
 const (
 	samplesMultiplier        = 8
 	insertionsMultiplier     = 2
@@ -58,22 +56,20 @@ func (l *tinyLFU) add(en *entry) *entry {
 	return candidate
 }
 
-func (l *tinyLFU) hit(el *list.Element) {
-	en := getEntry(el)
+func (l *tinyLFU) hit(en *entry) {
 	l.increase(en.hash)
 	if en.listID == admissionWindow {
-		l.lru.hit(el)
+		l.lru.hit(en)
 	} else {
-		l.slru.hit(el)
+		l.slru.hit(en)
 	}
 }
 
-func (l *tinyLFU) remove(el *list.Element) *entry {
-	en := getEntry(el)
+func (l *tinyLFU) remove(en *entry) *entry {
 	if en.listID == admissionWindow {
-		return l.lru.remove(el)
+		return l.lru.remove(en)
 	}
-	return l.slru.remove(el)
+	return l.slru.remove(en)
 }
 
 // increase adds the given hash to the filter and counter.
@@ -101,7 +97,9 @@ func (l *tinyLFU) estimate(h uint64) uint8 {
 	return freq
 }
 
-func (l *tinyLFU) walk(f func(list *list.List)) {
-	l.slru.walk(f)
-	l.lru.walk(f)
+// walkAccess walks through all lists by access time.
+func (l *tinyLFU) walkAccess(fn func(en *entry) bool) {
+	_ = walkListFromBack(&l.slru.protectedLs, fn) &&
+		walkListFromBack(&l.slru.probationLs, fn) &&
+		walkListFromBack(&l.lru.ls, fn)
 }

@@ -265,7 +265,7 @@ func TestExpireAfterWrite(t *testing.T) {
 	c := NewLoadingCache(loader, WithExpireAfterWrite(1*time.Second),
 		withInsertionListener(insFunc))
 	defer c.Close()
-
+	// New value
 	wg.Add(1)
 	v, err := c.Get("refresh")
 	if err != nil {
@@ -273,18 +273,18 @@ func TestExpireAfterWrite(t *testing.T) {
 	}
 	wg.Wait()
 	if v.(int) != 1 || loadCount != 1 {
-		t.Fatalf("unexpected load count: %v, %v", v, loadCount)
+		t.Fatalf("unexpected load count: %v value=%v, want: %v value=%v", loadCount, v, 1, 1)
 	}
-
+	// Within 1s, the value should not yet expired.
 	mockTime.add(1 * time.Second)
 	v, err = c.Get("refresh")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if v.(int) != 1 || loadCount != 1 {
-		t.Fatalf("unexpected load count: %v, %v", v, loadCount)
+		t.Fatalf("unexpected load count: %v value=%v, want: %v value=%v", loadCount, v, 1, 1)
 	}
-
+	// After 1s, the value should be expired and refresh triggered.
 	mockTime.add(1 * time.Nanosecond)
 	wg.Add(1)
 	v, err = c.Get("refresh")
@@ -292,12 +292,69 @@ func TestExpireAfterWrite(t *testing.T) {
 		t.Fatal(err)
 	}
 	wg.Wait()
+	if v.(int) != 1 || loadCount != 2 {
+		t.Fatalf("unexpected load count: %v value=%v, want: %v value=%v", loadCount, v, 2, 1)
+	}
+	// New value is loaded.
+	v, err = c.Get("refresh")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if v.(int) != 2 || loadCount != 2 {
-		t.Fatalf("unexpected load count: %v, %v", v, loadCount)
+		t.Fatalf("unexpected load count: %v value=%v, want: %v value=%v", loadCount, v, 2, 2)
 	}
 }
 
-func TestDoubleClose(t *testing.T) {
+func TestGetIfPresentExpired(t *testing.T) {
+	wg := sync.WaitGroup{}
+	insFunc := func(Key, Value) {
+		wg.Done()
+	}
+	c := New(WithExpireAfterWrite(1*time.Second), withInsertionListener(insFunc))
+	mockTime := newMockTime()
+	currentTime = mockTime.now
+
+	v, ok := c.GetIfPresent(0)
+	if ok {
+		t.Fatalf("expect not present, actual: %v %v", v, ok)
+	}
+	wg.Add(1)
+	c.Put(0, "0")
+	v, ok = c.GetIfPresent(0)
+	if !ok || v.(string) != "0" {
+		t.Fatalf("expect present, actual: %v %v", v, ok)
+	}
+	wg.Wait()
+	mockTime.add(2 * time.Second)
+	v, ok = c.GetIfPresent(0)
+	if ok {
+		t.Fatalf("expect not present, actual: %v %v", v, ok)
+	}
+}
+
+func TestSynchronousReload(t *testing.T) {
+	var val Value
+	loader := func(k Key) (Value, error) {
+		time.Sleep(1 * time.Millisecond)
+		return val, nil
+	}
+	executor := func(f func()) {
+		f()
+	}
+	c := NewLoadingCache(loader, WithExpireAfterWrite(1*time.Second), WithExecutor(executor))
+	val = "a"
+	v, err := c.Get(1)
+	if err != nil || v != val {
+		t.Fatalf("unexpected get %v %v", v, err)
+	}
+	val = "b"
+	v, err = c.Get(1)
+	if err != nil || v != val {
+		t.Fatalf("unexpected get %v %v", v, err)
+	}
+}
+
+func TestCloseMultiple(t *testing.T) {
 	c := New()
 	start := make(chan bool)
 	const n = 10
@@ -315,9 +372,11 @@ func TestDoubleClose(t *testing.T) {
 }
 
 func cacheSize(c *cache) int {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return len(c.data)
+	length := 0
+	c.walk(func(*entry) {
+		length++
+	})
+	return length
 }
 
 // mockTime is used for tests which required current system time.

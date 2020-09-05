@@ -51,11 +51,11 @@ func benchmarkCache(b *testing.B, g synthetic.Generator) {
 	defer c.Close()
 
 	intCh := make(chan int, 100)
-	go func() {
-		for i := 0; i < b.N; i++ {
+	go func(n int) {
+		for i := 0; i < n; i++ {
 			intCh <- g.Int()
 		}
-	}()
+	}(b.N)
 	defer close(intCh)
 
 	if b.N > benchmarkThreshold {

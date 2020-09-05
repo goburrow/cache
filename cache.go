@@ -45,7 +45,16 @@ type LoadingCache interface {
 	// Get returns value associated with Key or call underlying LoaderFunc
 	// to load value if it is not present.
 	Get(Key) (Value, error)
+
+	// Refresh loads new value for Key. If the Key already existed, the previous value
+	// will continue to be returned by Get while the new value is loading.
+	// If Key does not exist, this function will block until the value is loaded.
+	Refresh(Key)
 }
 
 // LoaderFunc retrieves the value corresponding to given Key.
 type LoaderFunc func(Key) (Value, error)
+
+// ExecutorFunc specifies how cache loader is run to refresh value for the Key.
+// By default, it is run in a new go routine.
+type ExecutorFunc func(func())
