@@ -1,6 +1,6 @@
 # Mango Cache
 [![GoDoc](https://godoc.org/github.com/goburrow/cache?status.svg)](https://godoc.org/github.com/goburrow/cache)
-[![Build Status](https://travis-ci.org/goburrow/cache.svg?branch=master)](https://travis-ci.org/goburrow/cache)
+![Go](https://github.com/goburrow/cache/workflows/Go/badge.svg)
 
 Partial implementations of [Guava Cache](https://github.com/google/guava) in Go.
 
