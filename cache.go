@@ -30,7 +30,8 @@ type Cache interface {
 	Stats(*Stats)
 
 	// Close implements io.Closer for cleaning up all resources.
-	// Once cache is closed, it should no longer be used.
+	// Users must ensure the cache is not being used before closing or
+	// after closed.
 	Close() error
 }
 

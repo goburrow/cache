@@ -98,6 +98,20 @@ func getEntry(el *list.Element) *entry {
 	return el.Value.(*entry)
 }
 
+// event is the cache event (add, hit or delete).
+type event uint8
+
+const (
+	eventAdd event = iota
+	eventHit
+	eventDelete
+)
+
+type entryEvent struct {
+	entry *entry
+	event event
+}
+
 // cache is a data structure for cache entries.
 type cache struct {
 	segs [segmentCount]sync.Map // map[Key]*entry

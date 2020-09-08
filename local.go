@@ -10,7 +10,7 @@ const (
 	// Default maximum number of cache entries.
 	maximumCapacity = 1 << 30
 	// Buffer size of entry channels
-	chanBufSize = 16
+	chanBufSize = 64
 	// Maximum number of entries to be drained in a single clean up.
 	drainMax = 16
 	// Number of cache access operations that will trigger clean up.
@@ -40,17 +40,15 @@ type localCache struct {
 	cap   int
 
 	entries policy
-	// Channels for processEntries
-	addEntry    chan *entry
-	hitEntry    chan *entry
-	deleteEntry chan *entry
+	// events is the cache event queue for processEntries
+	events chan entryEvent
 
 	// readCount is a counter of the number of reads since the last write.
 	readCount int32
 
 	// for closing routines created by this cache.
 	closeOnce sync.Once
-	closeCh   chan struct{}
+	closeWG   sync.WaitGroup
 }
 
 // newLocalCache returns a default localCache.
@@ -68,11 +66,9 @@ func (c *localCache) init() {
 	c.entries = newPolicy(c.policyName)
 	c.entries.init(&c.cache, c.cap)
 
-	c.addEntry = make(chan *entry, chanBufSize)
-	c.hitEntry = make(chan *entry, chanBufSize)
-	c.deleteEntry = make(chan *entry, chanBufSize)
+	c.events = make(chan entryEvent, chanBufSize)
 
-	c.closeCh = make(chan struct{})
+	c.closeWG.Add(1)
 	go c.processEntries()
 }
 
@@ -94,12 +90,12 @@ func (c *localCache) GetIfPresent(k Key) (Value, bool) {
 	now := currentTime()
 	if c.isExpired(en, now) {
 		c.stats.RecordMisses(1)
-		c.deleteEntry <- en
+		c.events <- entryEvent{en, eventDelete}
 		return nil, false
 	}
 	c.stats.RecordHits(1)
 	en.setAccessTime(now.UnixNano())
-	c.hitEntry <- en
+	c.events <- entryEvent{en, eventHit}
 	return en.getValue(), true
 }
 
@@ -126,7 +122,7 @@ func (c *localCache) Put(k Key, v Value) {
 		en.setValue(v)
 		en.setWriteTime(now.UnixNano())
 	}
-	c.addEntry <- en
+	c.events <- entryEvent{en, eventAdd}
 }
 
 // Invalidate removes the entry associated with key k.
@@ -134,7 +130,7 @@ func (c *localCache) Invalidate(k Key) {
 	en := c.cache.get(k, sum(k))
 	if en != nil {
 		en.setInvalidated(true)
-		c.deleteEntry <- en
+		c.events <- entryEvent{en, eventDelete}
 	}
 }
 
@@ -143,7 +139,7 @@ func (c *localCache) InvalidateAll() {
 	c.cache.walk(func(en *entry) {
 		en.setInvalidated(true)
 	})
-	c.deleteEntry <- nil
+	c.events <- entryEvent{nil, eventDelete}
 }
 
 // Get returns value associated with k or call underlying loader to retrieve value
@@ -160,7 +156,7 @@ func (c *localCache) Get(k Key) (Value, error) {
 	if c.isExpired(en, now) {
 		c.stats.RecordMisses(1)
 		if c.loader == nil {
-			c.deleteEntry <- en
+			c.events <- entryEvent{en, eventDelete}
 		} else {
 			// For loading cache, we do not delete entry but leave it to
 			// the eviction policy, so users still can get the old value.
@@ -170,7 +166,7 @@ func (c *localCache) Get(k Key) (Value, error) {
 	} else {
 		c.stats.RecordHits(1)
 		en.setAccessTime(now.UnixNano())
-		c.hitEntry <- en
+		c.events <- entryEvent{en, eventHit}
 	}
 	return en.getValue(), nil
 }
@@ -195,27 +191,25 @@ func (c *localCache) Stats(t *Stats) {
 }
 
 func (c *localCache) processEntries() {
-	defer close(c.closeCh)
-	for {
-		select {
-		case <-c.closeCh:
-			c.removeAll()
-			return
-		case en := <-c.addEntry:
-			c.add(en)
+	defer c.closeWG.Done()
+	for e := range c.events {
+		switch e.event {
+		case eventAdd:
+			c.add(e.entry)
 			c.postWriteCleanup()
-		case en := <-c.hitEntry:
-			c.hit(en)
+		case eventHit:
+			c.hit(e.entry)
 			c.postReadCleanup()
-		case en := <-c.deleteEntry:
-			if en == nil {
+		case eventDelete:
+			if e.entry == nil {
 				c.removeAll()
 			} else {
-				c.remove(en)
+				c.remove(e.entry)
 			}
 			c.postReadCleanup()
 		}
 	}
+	c.removeAll()
 }
 
 // This function must only be called from processEntries goroutine.
@@ -282,7 +276,7 @@ func (c *localCache) load(k Key) (Value, error) {
 	en := newEntry(k, v, sum(k))
 	en.setWriteTime(now.UnixNano())
 	en.setAccessTime(now.UnixNano())
-	c.addEntry <- en
+	c.events <- entryEvent{en, eventAdd}
 	return v, nil
 }
 
@@ -315,7 +309,7 @@ func (c *localCache) refresh(en *entry) {
 		c.stats.RecordLoadSuccess(loadTime)
 		en.setValue(v)
 		en.setWriteTime(now.UnixNano())
-		c.addEntry <- en
+		c.events <- entryEvent{en, eventAdd}
 	} else {
 		// TODO: Log error
 		c.stats.RecordLoadError(loadTime)
@@ -389,10 +383,9 @@ func (c *localCache) needRefresh(en *entry, now time.Time) bool {
 
 // close asks processEntries to stop.
 func (c *localCache) close() {
-	c.closeCh <- struct{}{}
+	close(c.events)
 	// Wait for the goroutine to close this channel
-	// (should use sync.WaitGroup or a new channel instead?)
-	<-c.closeCh
+	c.closeWG.Wait()
 }
 
 // New returns a local in-memory Cache.
