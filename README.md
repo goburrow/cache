@@ -61,6 +61,6 @@ func main() {
 
 ## Performance
 
-See [traces](traces/)
+See [traces](traces/) and [benchmark](https://github.com/goburrow/cache/wiki/Benchmark)
 
 ![report](traces/report.png)

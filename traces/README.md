@@ -1,10 +1,16 @@
 # Cache performance report
 
+Run all tests
+```
+./report.sh
+```
+
+Run individual test
 ```
 go test -v -run Wikipedia
 ./visualize-request.sh request_wikipedia-*.txt
 ./visualize-size.sh size_wikipedia-*.txt
-open out.svg
+open out.png
 ```
 
 ## Traces
