@@ -86,7 +86,7 @@ func (c *localCache) Close() error {
 // GetIfPresent gets cached value from entries list and updates
 // last access time for the entry if it is found.
 func (c *localCache) GetIfPresent(k Key) (Value, bool) {
-	en := c.cache.get(k)
+	en := c.cache.get(k, sum(k))
 	if en == nil {
 		c.stats.RecordMisses(1)
 		return nil, false
@@ -105,10 +105,11 @@ func (c *localCache) GetIfPresent(k Key) (Value, bool) {
 
 // Put adds new entry to entries list.
 func (c *localCache) Put(k Key, v Value) {
-	en := c.cache.get(k)
+	h := sum(k)
+	en := c.cache.get(k, h)
 	now := currentTime()
 	if en == nil {
-		en = newEntry(k, v, sum(k))
+		en = newEntry(k, v, h)
 		en.setWriteTime(now.UnixNano())
 		en.setAccessTime(now.UnixNano())
 		// Add to the cache directly so the new value is available immediately.
@@ -130,7 +131,7 @@ func (c *localCache) Put(k Key, v Value) {
 
 // Invalidate removes the entry associated with key k.
 func (c *localCache) Invalidate(k Key) {
-	en := c.cache.get(k)
+	en := c.cache.get(k, sum(k))
 	if en != nil {
 		en.setInvalidated(true)
 		c.deleteEntry <- en
@@ -149,7 +150,7 @@ func (c *localCache) InvalidateAll() {
 // if it is not in the cache. The returned value is only cached when loader returns
 // nil error.
 func (c *localCache) Get(k Key) (Value, error) {
-	en := c.cache.get(k)
+	en := c.cache.get(k, sum(k))
 	if en == nil {
 		c.stats.RecordMisses(1)
 		return c.load(k)
@@ -180,7 +181,7 @@ func (c *localCache) Refresh(k Key) {
 	if c.loader == nil {
 		return
 	}
-	en := c.cache.get(k)
+	en := c.cache.get(k, sum(k))
 	if en == nil {
 		c.load(k)
 	} else {
@@ -237,11 +238,11 @@ func (c *localCache) add(en *entry) {
 func (c *localCache) removeAll() {
 	if c.onRemoval == nil {
 		c.cache.walk(func(en *entry) {
-			c.cache.delete(en.key)
+			c.cache.delete(en)
 		})
 	} else {
 		c.cache.walk(func(en *entry) {
-			c.cache.delete(en.key)
+			c.cache.delete(en)
 			c.onRemoval(en.key, en.getValue())
 		})
 	}

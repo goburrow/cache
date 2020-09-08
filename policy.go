@@ -6,6 +6,13 @@ import (
 	"sync/atomic"
 )
 
+const (
+	// Number of cache data store will be 2 ^ concurrencyLevel.
+	concurrencyLevel = 2
+	segmentCount     = 1 << concurrencyLevel
+	segmentMask      = segmentCount - 1
+)
+
 // entry stores cached entry key and value.
 type entry struct {
 	key   Key
@@ -93,12 +100,13 @@ func getEntry(el *list.Element) *entry {
 
 // cache is a data structure for cache entries.
 type cache struct {
-	data sync.Map // map[Key]*entry
+	segs [segmentCount]sync.Map // map[Key]*entry
 	size int64
 }
 
-func (c *cache) get(k Key) *entry {
-	v, ok := c.data.Load(k)
+func (c *cache) get(k Key, h uint64) *entry {
+	seg := c.segment(h)
+	v, ok := seg.Load(k)
 	if ok {
 		return v.(*entry)
 	}
@@ -106,7 +114,8 @@ func (c *cache) get(k Key) *entry {
 }
 
 func (c *cache) getOrSet(v *entry) *entry {
-	en, ok := c.data.LoadOrStore(v.key, v)
+	seg := c.segment(v.hash)
+	en, ok := seg.LoadOrStore(v.key, v)
 	if ok {
 		return en.(*entry)
 	}
@@ -114,8 +123,9 @@ func (c *cache) getOrSet(v *entry) *entry {
 	return nil
 }
 
-func (c *cache) delete(k Key) {
-	c.data.Delete(k)
+func (c *cache) delete(v *entry) {
+	seg := c.segment(v.hash)
+	seg.Delete(v.key)
 	atomic.AddInt64(&c.size, -1)
 }
 
@@ -124,10 +134,16 @@ func (c *cache) len() int {
 }
 
 func (c *cache) walk(fn func(*entry)) {
-	c.data.Range(func(k, v interface{}) bool {
-		fn(v.(*entry))
-		return true
-	})
+	for i := range c.segs {
+		c.segs[i].Range(func(k, v interface{}) bool {
+			fn(v.(*entry))
+			return true
+		})
+	}
+}
+
+func (c *cache) segment(h uint64) *sync.Map {
+	return &c.segs[h&segmentMask]
 }
 
 // policy is a cache policy.

@@ -46,7 +46,7 @@ func (t *lruTest) assertEntry(en *entry, k int, v string, id uint8) {
 }
 
 func (t *lruTest) assertLRUEntry(k int) {
-	en := t.c.get(k)
+	en := t.c.get(k, 0)
 	if en == nil {
 		t.t.Helper()
 		t.t.Fatalf("entry not found in cache: key=%v", k)
@@ -61,7 +61,7 @@ func (t *lruTest) assertLRUEntry(k int) {
 }
 
 func (t *lruTest) assertSLRUEntry(k int, id uint8) {
-	en := t.c.get(k)
+	en := t.c.get(k, 0)
 	if en == nil {
 		t.t.Helper()
 		t.t.Fatalf("entry not found in cache: key=%v", k)

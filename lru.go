@@ -69,7 +69,7 @@ func (l *lruCache) remove(en *entry) *entry {
 		// Already deleted
 		return nil
 	}
-	l.cache.delete(en.key)
+	l.cache.delete(en)
 	l.ls.Remove(en.accessList)
 	en.accessList = nil
 	return en
@@ -189,7 +189,7 @@ func (l *slruCache) remove(en *entry) *entry {
 	if en.accessList == nil {
 		return nil
 	}
-	l.cache.delete(en.key)
+	l.cache.delete(en)
 	if en.listID == protectedSegment {
 		l.protectedLs.Remove(en.accessList)
 	} else {

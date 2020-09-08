@@ -42,7 +42,7 @@ func (t *tinyLFUTest) assertEntry(en *entry, k int, v string, id uint8) {
 }
 
 func (t *tinyLFUTest) assertLRUEntry(k int, id uint8) {
-	en := t.c.get(k)
+	en := t.c.get(k, sum(k))
 	if en == nil {
 		t.t.Helper()
 		t.t.Fatalf("entry not found in cache: key=%v", k)

@@ -12,6 +12,17 @@ const (
 	benchmarkThreshold = 100
 )
 
+type sameGenerator int
+
+func (g sameGenerator) Int() int {
+	return int(g)
+}
+
+func BenchmarkSame(b *testing.B) {
+	g := sameGenerator(1)
+	benchmarkCache(b, g)
+}
+
 func BenchmarkUniform(b *testing.B) {
 	distintKeys := testMaxSize * 2
 	g := synthetic.Uniform(0, distintKeys)

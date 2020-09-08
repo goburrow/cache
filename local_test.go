@@ -371,6 +371,18 @@ func TestCloseMultiple(t *testing.T) {
 	wg.Wait()
 }
 
+func BenchmarkGetSame(b *testing.B) {
+	c := New()
+	c.Put("*", "*")
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			c.GetIfPresent("*")
+		}
+	})
+}
+
 func cacheSize(c *cache) int {
 	length := 0
 	c.walk(func(*entry) {

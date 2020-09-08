@@ -19,36 +19,36 @@ func sum(k interface{}) uint64 {
 	case int:
 		return hashU64(uint64(h))
 	case int8:
-		return hashU64(uint64(h))
+		return hashU32(uint32(h))
 	case int16:
-		return hashU64(uint64(h))
+		return hashU32(uint32(h))
 	case int32:
-		return hashU64(uint64(h))
+		return hashU32(uint32(h))
 	case int64:
 		return hashU64(uint64(h))
 	case uint:
 		return hashU64(uint64(h))
 	case uint8:
-		return hashU64(uint64(h))
+		return hashU32(uint32(h))
 	case uint16:
-		return hashU64(uint64(h))
+		return hashU32(uint32(h))
 	case uint32:
-		return hashU64(uint64(h))
+		return hashU32(h)
 	case uint64:
 		return hashU64(h)
 	case uintptr:
 		return hashU64(uint64(h))
 	case float32:
-		return hashU64(uint64(math.Float32bits(h)))
+		return hashU32(math.Float32bits(h))
 	case float64:
 		return hashU64(math.Float64bits(h))
 	case bool:
 		if h {
-			return hashU64(1)
+			return 1
 		}
-		return hashU64(0)
+		return 0
 	case string:
-		return hashBytes([]byte(h))
+		return hashString(h)
 	}
 	// TODO: complex64 and complex128
 	if h, ok := hashPointer(k); ok {
@@ -66,15 +66,44 @@ const (
 func hashU64(v uint64) uint64 {
 	// Inline code from hash/fnv to reduce memory allocations
 	h := fnvOffset
-	for i := uint(0); i < 64; i += 8 {
-		h ^= (v >> i) & 0xFF
-		h *= fnvPrime
-	}
+	// for i := uint(0); i < 64; i += 8 {
+	// 	h ^= (v >> i) & 0xFF
+	// 	h *= fnvPrime
+	// }
+	h ^= (v >> 0) & 0xFF
+	h *= fnvPrime
+	h ^= (v >> 8) & 0xFF
+	h *= fnvPrime
+	h ^= (v >> 16) & 0xFF
+	h *= fnvPrime
+	h ^= (v >> 24) & 0xFF
+	h *= fnvPrime
+	h ^= (v >> 32) & 0xFF
+	h *= fnvPrime
+	h ^= (v >> 40) & 0xFF
+	h *= fnvPrime
+	h ^= (v >> 48) & 0xFF
+	h *= fnvPrime
+	h ^= (v >> 56) & 0xFF
+	h *= fnvPrime
 	return h
 }
 
-// hashBytes calculates hash value using FNV-1a algorithm.
-func hashBytes(data []byte) uint64 {
+func hashU32(v uint32) uint64 {
+	h := fnvOffset
+	h ^= uint64(v>>0) & 0xFF
+	h *= fnvPrime
+	h ^= uint64(v>>8) & 0xFF
+	h *= fnvPrime
+	h ^= uint64(v>>16) & 0xFF
+	h *= fnvPrime
+	h ^= uint64(v>>24) & 0xFF
+	h *= fnvPrime
+	return h
+}
+
+// hashString calculates hash value using FNV-1a algorithm.
+func hashString(data string) uint64 {
 	// Inline code from hash/fnv to reduce memory allocations
 	h := fnvOffset
 	for _, b := range data {
