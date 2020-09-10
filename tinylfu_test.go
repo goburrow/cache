@@ -69,7 +69,7 @@ func TestTinyLFU(t *testing.T) {
 		en[i] = newEntry(i, fmt.Sprintf("%d", i), sum(i))
 	}
 	for i := 0; i < 5; i++ {
-		remEn := s.lfu.add(en[i])
+		remEn := s.lfu.write(en[i])
 		if remEn != nil {
 			t.Fatalf("unexpected entry removed: %+v", remEn)
 		}
@@ -82,24 +82,24 @@ func TestTinyLFU(t *testing.T) {
 	s.assertLRUEntry(1, probationSegment)
 	s.assertLRUEntry(0, probationSegment)
 
-	s.lfu.hit(en[1])
-	s.lfu.hit(en[2])
+	s.lfu.access(en[1])
+	s.lfu.access(en[2])
 	// 4 3 | 2 1 | 0
 	s.assertLen(2, 2, 1)
 	s.assertLRUEntry(2, protectedSegment)
 	s.assertLRUEntry(1, protectedSegment)
 	s.assertLRUEntry(0, probationSegment)
 
-	remEn := s.lfu.add(en[5])
+	remEn := s.lfu.write(en[5])
 	// 5 4 | 2 1 | 0
 	if remEn == nil {
 		t.Fatalf("expect an entry removed when adding %+v", en[5])
 	}
 	s.assertEntry(remEn, 3, "3", admissionWindow)
 
-	s.lfu.hit(en[4])
-	s.lfu.hit(en[5])
-	remEn = s.lfu.add(en[6])
+	s.lfu.access(en[4])
+	s.lfu.access(en[5])
+	remEn = s.lfu.write(en[6])
 	// 6 5 | 2 1 | 4
 	if remEn == nil {
 		t.Fatalf("expect an entry removed when adding %+v", en[6])
@@ -110,8 +110,8 @@ func TestTinyLFU(t *testing.T) {
 	if n != 2 {
 		t.Fatalf("unexpected estimate: %d %+v", n, en[1])
 	}
-	s.lfu.hit(en[2])
-	s.lfu.hit(en[2])
+	s.lfu.access(en[2])
+	s.lfu.access(en[2])
 	n = s.lfu.estimate(en[2].hash)
 	if n != 4 {
 		t.Fatalf("unexpected estimate: %d %+v", n, en[2])

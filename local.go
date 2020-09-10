@@ -32,14 +32,18 @@ type localCache struct {
 	onRemoval   Func
 
 	loader LoaderFunc
-	exec   ExecutorFunc
+	exec   Executor
 	stats  StatsCounter
 
 	// internal data structure
 	cache cache
 	cap   int
 
-	entries policy
+	// accessQueue is the cache retention policy, which manages entries by access time.
+	accessQueue policy
+	// writeQueue is for managing entries by write time.
+	// It is only fulfilled when expireAfterWrite or refreshAfterWrite is set.
+	writeQueue policy
 	// events is the cache event queue for processEntries
 	events chan entryEvent
 
@@ -47,8 +51,8 @@ type localCache struct {
 	readCount int32
 
 	// for closing routines created by this cache.
-	closeOnce sync.Once
-	closeWG   sync.WaitGroup
+	closing int32
+	closeWG sync.WaitGroup
 }
 
 // newLocalCache returns a default localCache.
@@ -63,9 +67,14 @@ func newLocalCache() *localCache {
 
 // init initializes cache replacement policy after all user configuration properties are set.
 func (c *localCache) init() {
-	c.entries = newPolicy(c.policyName)
-	c.entries.init(&c.cache, c.cap)
-
+	c.accessQueue = newPolicy(c.policyName)
+	c.accessQueue.init(&c.cache, c.cap)
+	if c.expireAfterWrite > 0 || c.refreshAfterWrite > 0 {
+		c.writeQueue = &recencyQueue{}
+	} else {
+		c.writeQueue = discardingQueue{}
+	}
+	c.writeQueue.init(&c.cache, c.cap)
 	c.events = make(chan entryEvent, chanBufSize)
 
 	c.closeWG.Add(1)
@@ -75,7 +84,12 @@ func (c *localCache) init() {
 // Close implements io.Closer and always returns a nil error.
 // Caller would ensure the cache is not being used (reading and writing) before closing.
 func (c *localCache) Close() error {
-	c.closeOnce.Do(c.close)
+	if atomic.CompareAndSwapInt32(&c.closing, 0, 1) {
+		// Do not close events channel to avoid panic when cache is still being used.
+		c.events <- entryEvent{nil, eventClose}
+		// Wait for the goroutine to close this channel
+		c.closeWG.Wait()
+	}
 	return nil
 }
 
@@ -90,12 +104,12 @@ func (c *localCache) GetIfPresent(k Key) (Value, bool) {
 	now := currentTime()
 	if c.isExpired(en, now) {
 		c.stats.RecordMisses(1)
-		c.events <- entryEvent{en, eventDelete}
+		c.sendEvent(eventDelete, en)
 		return nil, false
 	}
 	c.stats.RecordHits(1)
-	en.setAccessTime(now.UnixNano())
-	c.events <- entryEvent{en, eventHit}
+	c.setEntryAccessTime(en, now)
+	c.sendEvent(eventAccess, en)
 	return en.getValue(), true
 }
 
@@ -106,8 +120,8 @@ func (c *localCache) Put(k Key, v Value) {
 	now := currentTime()
 	if en == nil {
 		en = newEntry(k, v, h)
-		en.setWriteTime(now.UnixNano())
-		en.setAccessTime(now.UnixNano())
+		c.setEntryWriteTime(en, now)
+		c.setEntryAccessTime(en, now)
 		// Add to the cache directly so the new value is available immediately.
 		// However, only do this within the cache capacity (approximately).
 		if c.cap == 0 || c.cache.len() < c.cap {
@@ -122,7 +136,7 @@ func (c *localCache) Put(k Key, v Value) {
 		en.setValue(v)
 		en.setWriteTime(now.UnixNano())
 	}
-	c.events <- entryEvent{en, eventAdd}
+	c.sendEvent(eventWrite, en)
 }
 
 // Invalidate removes the entry associated with key k.
@@ -130,7 +144,7 @@ func (c *localCache) Invalidate(k Key) {
 	en := c.cache.get(k, sum(k))
 	if en != nil {
 		en.setInvalidated(true)
-		c.events <- entryEvent{en, eventDelete}
+		c.sendEvent(eventDelete, en)
 	}
 }
 
@@ -139,7 +153,7 @@ func (c *localCache) InvalidateAll() {
 	c.cache.walk(func(en *entry) {
 		en.setInvalidated(true)
 	})
-	c.events <- entryEvent{nil, eventDelete}
+	c.sendEvent(eventDelete, nil)
 }
 
 // Get returns value associated with k or call underlying loader to retrieve value
@@ -156,17 +170,17 @@ func (c *localCache) Get(k Key) (Value, error) {
 	if c.isExpired(en, now) {
 		c.stats.RecordMisses(1)
 		if c.loader == nil {
-			c.events <- entryEvent{en, eventDelete}
+			c.sendEvent(eventDelete, en)
 		} else {
 			// For loading cache, we do not delete entry but leave it to
 			// the eviction policy, so users still can get the old value.
-			en.setAccessTime(now.UnixNano())
+			c.setEntryAccessTime(en, now)
 			c.refreshAsync(en)
 		}
 	} else {
 		c.stats.RecordHits(1)
-		en.setAccessTime(now.UnixNano())
-		c.events <- entryEvent{en, eventHit}
+		c.setEntryAccessTime(en, now)
+		c.sendEvent(eventAccess, en)
 	}
 	return en.getValue(), nil
 }
@@ -194,11 +208,11 @@ func (c *localCache) processEntries() {
 	defer c.closeWG.Done()
 	for e := range c.events {
 		switch e.event {
-		case eventAdd:
-			c.add(e.entry)
+		case eventWrite:
+			c.write(e.entry)
 			c.postWriteCleanup()
-		case eventHit:
-			c.hit(e.entry)
+		case eventAccess:
+			c.access(e.entry)
 			c.postReadCleanup()
 		case eventDelete:
 			if e.entry == nil {
@@ -207,22 +221,37 @@ func (c *localCache) processEntries() {
 				c.remove(e.entry)
 			}
 			c.postReadCleanup()
+		case eventClose:
+			if c.exec != nil {
+				// Stop all refresh tasks.
+				c.exec.Close()
+			}
+			c.removeAll()
+			return
 		}
 	}
-	c.removeAll()
+}
+
+// sendEvent sends event only when the cache is not closing/closed.
+func (c *localCache) sendEvent(typ event, en *entry) {
+	if atomic.LoadInt32(&c.closing) == 0 {
+		c.events <- entryEvent{en, typ}
+	}
 }
 
 // This function must only be called from processEntries goroutine.
-func (c *localCache) add(en *entry) {
-	remEn := c.entries.add(en)
+func (c *localCache) write(en *entry) {
+	ren := c.accessQueue.write(en)
+	c.writeQueue.write(en)
 	if c.onInsertion != nil {
 		c.onInsertion(en.key, en.getValue())
 	}
-	if remEn != nil {
+	if ren != nil {
+		c.writeQueue.remove(ren)
 		// An entry has been evicted
 		c.stats.RecordEviction()
 		if c.onRemoval != nil {
-			c.onRemoval(remEn.key, remEn.getValue())
+			c.onRemoval(ren.key, ren.getValue())
 		}
 	}
 }
@@ -230,31 +259,26 @@ func (c *localCache) add(en *entry) {
 // removeAll remove all entries in the cache.
 // This function must only be called from processEntries goroutine.
 func (c *localCache) removeAll() {
-	if c.onRemoval == nil {
-		c.cache.walk(func(en *entry) {
-			c.cache.delete(en)
-		})
-	} else {
-		c.cache.walk(func(en *entry) {
-			c.cache.delete(en)
-			c.onRemoval(en.key, en.getValue())
-		})
-	}
+	c.accessQueue.iterate(func(en *entry) bool {
+		c.remove(en)
+		return true
+	})
 }
 
 // remove removes the given element from the cache and entries list.
 // It also calls onRemoval callback if it is set.
 func (c *localCache) remove(en *entry) {
-	en = c.entries.remove(en)
-	if en != nil && c.onRemoval != nil {
-		c.onRemoval(en.key, en.getValue())
+	ren := c.accessQueue.remove(en)
+	c.writeQueue.remove(en)
+	if ren != nil && c.onRemoval != nil {
+		c.onRemoval(ren.key, ren.getValue())
 	}
 }
 
-// hit moves the given element to the top of the entries list.
+// access moves the given element to the top of the entries list.
 // This function must only be called from processEntries goroutine.
-func (c *localCache) hit(en *entry) {
-	c.entries.hit(en)
+func (c *localCache) access(en *entry) {
+	c.accessQueue.access(en)
 }
 
 // load uses current loader to synchronously retrieve value for k and adds new
@@ -274,13 +298,14 @@ func (c *localCache) load(k Key) (Value, error) {
 	}
 	c.stats.RecordLoadSuccess(loadTime)
 	en := newEntry(k, v, sum(k))
-	en.setWriteTime(now.UnixNano())
-	en.setAccessTime(now.UnixNano())
-	c.events <- entryEvent{en, eventAdd}
+	c.setEntryWriteTime(en, now)
+	c.setEntryAccessTime(en, now)
+	c.sendEvent(eventWrite, en)
 	return v, nil
 }
 
-func (c *localCache) refreshAsync(en *entry) {
+// refreshAsync reloads value in a go routine or using custom executor if defined.
+func (c *localCache) refreshAsync(en *entry) bool {
 	if c.loader == nil {
 		panic("cache loader function must be set")
 	}
@@ -289,15 +314,16 @@ func (c *localCache) refreshAsync(en *entry) {
 		if c.exec == nil {
 			go c.refresh(en)
 		} else {
-			c.exec(func() { c.refresh(en) })
+			c.exec.Execute(func() { c.refresh(en) })
 		}
+		return true
 	}
+	return false
 }
 
 // refresh reloads value for the given key. If loader returns an error,
-// that error will be omitted and current value will be returned.
-// Otherwise, the function will returns new value and updates the current
-// cache entry.
+// that error will be omitted. Otherwise, the entry value will be updated.
+// This function would only be called by refreshAsync.
 func (c *localCache) refresh(en *entry) {
 	defer en.setLoading(false)
 
@@ -309,7 +335,7 @@ func (c *localCache) refresh(en *entry) {
 		c.stats.RecordLoadSuccess(loadTime)
 		en.setValue(v)
 		en.setWriteTime(now.UnixNano())
-		c.events <- entryEvent{en, eventAdd}
+		c.sendEvent(eventWrite, en)
 	} else {
 		// TODO: Log error
 		c.stats.RecordLoadError(loadTime)
@@ -334,22 +360,51 @@ func (c *localCache) postWriteCleanup() {
 
 // expireEntries removes expired entries.
 func (c *localCache) expireEntries() {
-	if c.expireAfterAccess <= 0 {
-		return
-	}
-	expire := currentTime().Add(-c.expireAfterAccess).UnixNano()
 	remain := drainMax
-	c.entries.walkAccess(func(en *entry) bool {
-		if en.getAccessTime() >= expire {
-			// Can stop as the entries are sorted by access time.
-			return false
-		}
-		// accessTime + expiry passed
-		c.remove(en)
-		c.stats.RecordEviction()
-		remain--
-		return remain > 0
-	})
+	now := currentTime()
+	if c.expireAfterAccess > 0 {
+		expiry := now.Add(-c.expireAfterAccess).UnixNano()
+		c.accessQueue.iterate(func(en *entry) bool {
+			if remain == 0 || en.getAccessTime() >= expiry {
+				// Can stop as the entries are sorted by access time.
+				// (the next entry is accessed more recently.)
+				return false
+			}
+			// accessTime + expiry passed
+			c.remove(en)
+			c.stats.RecordEviction()
+			remain--
+			return remain > 0
+		})
+	}
+	if remain > 0 && c.expireAfterWrite > 0 {
+		expiry := now.Add(-c.expireAfterWrite).UnixNano()
+		c.writeQueue.iterate(func(en *entry) bool {
+			if remain == 0 || en.getWriteTime() >= expiry {
+				return false
+			}
+			// writeTime + expiry passed
+			c.remove(en)
+			c.stats.RecordEviction()
+			remain--
+			return remain > 0
+		})
+	}
+	if remain > 0 && c.loader != nil && c.refreshAfterWrite > 0 {
+		expiry := now.Add(-c.refreshAfterWrite).UnixNano()
+		c.writeQueue.iterate(func(en *entry) bool {
+			if remain == 0 || en.getWriteTime() >= expiry {
+				return false
+			}
+			// FIXME: This can cause deadlock if the custom executor runs refresh in current go routine.
+			// The refresh function, when finish, will send to event channels.
+			if c.refreshAsync(en) {
+				// TODO: Maybe move this entry up?
+				remain--
+			}
+			return remain > 0
+		})
+	}
 }
 
 func (c *localCache) isExpired(en *entry, now time.Time) bool {
@@ -381,11 +436,18 @@ func (c *localCache) needRefresh(en *entry, now time.Time) bool {
 	return false
 }
 
-// close asks processEntries to stop.
-func (c *localCache) close() {
-	close(c.events)
-	// Wait for the goroutine to close this channel
-	c.closeWG.Wait()
+// setEntryAccessTime sets access time if needed.
+func (c *localCache) setEntryAccessTime(en *entry, now time.Time) {
+	if c.expireAfterAccess > 0 {
+		en.setAccessTime(now.UnixNano())
+	}
+}
+
+// setEntryWriteTime sets write time if needed.
+func (c *localCache) setEntryWriteTime(en *entry, now time.Time) {
+	if c.expireAfterWrite > 0 || c.refreshAfterWrite > 0 {
+		en.setWriteTime(now.UnixNano())
+	}
 }
 
 // New returns a local in-memory Cache.
@@ -477,7 +539,7 @@ func WithPolicy(name string) Option {
 // WithExecutor returns an option which sets executor for cache loader.
 // By default, each asynchronous reload is run in a go routine.
 // This option is only applicable for LoadingCache.
-func WithExecutor(executor ExecutorFunc) Option {
+func WithExecutor(executor Executor) Option {
 	return func(c *localCache) {
 		c.exec = executor
 	}

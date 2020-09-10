@@ -305,6 +305,55 @@ func TestExpireAfterWrite(t *testing.T) {
 	}
 }
 
+func TestRefreshAterWrite(t *testing.T) {
+	var mutex sync.Mutex
+	loaded := make(map[int]int)
+	loader := func(k Key) (Value, error) {
+		mutex.Lock()
+		n := loaded[k.(int)]
+		n++
+		loaded[k.(int)] = n
+		mutex.Unlock()
+		return n, nil
+	}
+	wg := sync.WaitGroup{}
+	insFunc := func(Key, Value) {
+		wg.Done()
+	}
+	mockTime := newMockTime()
+	currentTime = mockTime.now
+	c := NewLoadingCache(loader, WithExpireAfterAccess(4*time.Second), WithRefreshAfterWrite(2*time.Second),
+		WithExecutor(syncExecutor{}), withInsertionListener(insFunc))
+	defer c.Close()
+
+	wg.Add(3)
+	v, err := c.Get(1)
+	if err != nil || v.(int) != 1 {
+		t.Fatalf("unexpected get: %v %v", v, err)
+	}
+	// 3s
+	mockTime.add(3 * time.Second)
+	v, err = c.Get(2)
+	if err != nil || v.(int) != 1 {
+		t.Fatalf("unexpected get: %v %v", v, err)
+	}
+	wg.Wait()
+	if loaded[1] != 2 || loaded[2] != 1 {
+		t.Fatalf("unexpected loaded: %v", loaded)
+	}
+	v, err = c.Get(1)
+	if err != nil || v.(int) != 2 {
+		t.Fatalf("unexpected get: %v %v", v, err)
+	}
+	// 8s
+	mockTime.add(5 * time.Second)
+	wg.Add(1)
+	v, err = c.Get(1)
+	if err != nil || v.(int) != 3 {
+		t.Fatalf("unexpected get: %v %v", v, err)
+	}
+}
+
 func TestGetIfPresentExpired(t *testing.T) {
 	wg := sync.WaitGroup{}
 	insFunc := func(Key, Value) {
@@ -336,12 +385,12 @@ func TestSynchronousReload(t *testing.T) {
 	var val Value
 	loader := func(k Key) (Value, error) {
 		time.Sleep(1 * time.Millisecond)
+		if val == nil {
+			return nil, errors.New("nil")
+		}
 		return val, nil
 	}
-	executor := func(f func()) {
-		f()
-	}
-	c := NewLoadingCache(loader, WithExpireAfterWrite(1*time.Second), WithExecutor(executor))
+	c := NewLoadingCache(loader, WithExpireAfterWrite(1*time.Second), WithExecutor(syncExecutor{}))
 	val = "a"
 	v, err := c.Get(1)
 	if err != nil || v != val {
@@ -351,6 +400,11 @@ func TestSynchronousReload(t *testing.T) {
 	v, err = c.Get(1)
 	if err != nil || v != val {
 		t.Fatalf("unexpected get %v %v", v, err)
+	}
+	val = nil
+	v, err = c.Get(2)
+	if v != nil || err == nil || err.Error() != "nil" {
+		t.Fatalf("expect error: actual %v %v", v, err)
 	}
 }
 
@@ -369,6 +423,12 @@ func TestCloseMultiple(t *testing.T) {
 	}
 	close(start)
 	wg.Wait()
+	// Should not panic
+	c.GetIfPresent(0)
+	c.Put(1, 1)
+	c.Invalidate(0)
+	c.InvalidateAll()
+	c.Close()
 }
 
 func BenchmarkGetSame(b *testing.B) {
@@ -413,4 +473,14 @@ func (t *mockTime) now() time.Time {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	return t.value
+}
+
+type syncExecutor struct{}
+
+func (syncExecutor) Execute(f func()) {
+	f()
+}
+
+func (syncExecutor) Close() error {
+	return nil
 }

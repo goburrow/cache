@@ -33,6 +33,8 @@ type entry struct {
 
 	// accessList is the list (ordered by access time) this entry is currently in.
 	accessList *list.Element
+	// writeList is the list (ordered by write time) this entry is currently in.
+	writeList *list.Element
 	// listID is ID of the list which this entry is currently in.
 	listID uint8
 }
@@ -102,9 +104,10 @@ func getEntry(el *list.Element) *entry {
 type event uint8
 
 const (
-	eventAdd event = iota
-	eventHit
+	eventWrite event = iota
+	eventAccess
 	eventDelete
+	eventClose
 )
 
 type entryEvent struct {
@@ -164,14 +167,16 @@ func (c *cache) segment(h uint64) *sync.Map {
 type policy interface {
 	// init initializes the policy.
 	init(cache *cache, maximumSize int)
-	// add adds new entry and returns evicted entry if needed.
-	add(entry *entry) *entry
-	// hit marks then entry recently accessed.
-	hit(entry *entry)
+	// write handles Write event for the entry.
+	// It adds new entry and returns evicted entry if needed.
+	write(entry *entry) *entry
+	// access handles Access event for the entry.
+	// It marks then entry recently accessed.
+	access(entry *entry)
 	// remove removes the entry.
 	remove(entry *entry) *entry
-	// walkAccess iterates all entries by their access time.
-	walkAccess(func(entry *entry) bool)
+	// iterate iterates all entries by their access time.
+	iterate(func(entry *entry) bool)
 }
 
 func newPolicy(name string) policy {
@@ -184,5 +189,69 @@ func newPolicy(name string) policy {
 		return &tinyLFU{}
 	default:
 		panic("cache: unsupported policy " + name)
+	}
+}
+
+// recencyQueue manages cache entries by write time.
+type recencyQueue struct {
+	ls list.List
+}
+
+func (w *recencyQueue) init(cache *cache, maximumSize int) {
+	w.ls.Init()
+}
+
+func (w *recencyQueue) write(en *entry) *entry {
+	if en.writeList == nil {
+		en.writeList = w.ls.PushFront(en)
+	} else {
+		w.ls.MoveToFront(en.writeList)
+	}
+	return nil
+}
+
+func (w *recencyQueue) access(en *entry) {
+}
+
+func (w *recencyQueue) remove(en *entry) *entry {
+	if en.writeList == nil {
+		return en
+	}
+	w.ls.Remove(en.writeList)
+	en.writeList = nil
+	return en
+}
+
+func (w *recencyQueue) iterate(fn func(en *entry) bool) {
+	iterateListFromBack(&w.ls, fn)
+}
+
+type discardingQueue struct{}
+
+func (discardingQueue) init(cache *cache, maximumSize int) {
+}
+
+func (discardingQueue) write(en *entry) *entry {
+	return nil
+}
+
+func (discardingQueue) access(en *entry) {
+}
+
+func (discardingQueue) remove(en *entry) *entry {
+	return en
+}
+
+func (discardingQueue) iterate(fn func(en *entry) bool) {
+}
+
+func iterateListFromBack(ls *list.List, fn func(en *entry) bool) {
+	for el := ls.Back(); el != nil; {
+		en := getEntry(el)
+		prev := el.Prev() // Get Prev as fn can delete the entry.
+		if !fn(en) {
+			return
+		}
+		el = prev
 	}
 }

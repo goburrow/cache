@@ -34,34 +34,34 @@ func (l *tinyLFU) init(c *cache, cap int) {
 	l.slru.init(c, cap-lruCap)
 }
 
-func (l *tinyLFU) add(en *entry) *entry {
+func (l *tinyLFU) write(en *entry) *entry {
 	if l.lru.cap <= 0 {
-		return l.slru.add(en)
+		return l.slru.write(en)
 	}
 	l.increase(en.hash)
-	candidate := l.lru.add(en)
+	candidate := l.lru.write(en)
 	if candidate == nil {
 		return nil
 	}
 	victim := l.slru.victim()
 	if victim == nil {
-		return l.slru.add(candidate)
+		return l.slru.write(candidate)
 	}
 	// Determine one going to be evicted
 	candidateFreq := l.estimate(candidate.hash)
 	victimFreq := l.estimate(victim.hash)
 	if candidateFreq > victimFreq {
-		return l.slru.add(candidate)
+		return l.slru.write(candidate)
 	}
 	return candidate
 }
 
-func (l *tinyLFU) hit(en *entry) {
+func (l *tinyLFU) access(en *entry) {
 	l.increase(en.hash)
 	if en.listID == admissionWindow {
-		l.lru.hit(en)
+		l.lru.access(en)
 	} else {
-		l.slru.hit(en)
+		l.slru.access(en)
 	}
 }
 
@@ -97,9 +97,8 @@ func (l *tinyLFU) estimate(h uint64) uint8 {
 	return freq
 }
 
-// walkAccess walks through all lists by access time.
-func (l *tinyLFU) walkAccess(fn func(en *entry) bool) {
-	_ = walkListFromBack(&l.slru.protectedLs, fn) &&
-		walkListFromBack(&l.slru.probationLs, fn) &&
-		walkListFromBack(&l.lru.ls, fn)
+// iterate walks through all lists by access time.
+func (l *tinyLFU) iterate(fn func(en *entry) bool) {
+	l.slru.iterate(fn)
+	l.lru.iterate(fn)
 }

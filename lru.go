@@ -18,12 +18,12 @@ func (l *lruCache) init(c *cache, cap int) {
 	l.ls.Init()
 }
 
-// add adds new entry to the cache and returns evicted entry if necessary.
-func (l *lruCache) add(en *entry) *entry {
+// write adds new entry to the cache and returns evicted entry if necessary.
+func (l *lruCache) write(en *entry) *entry {
 	// Fast path
 	if en.accessList != nil {
 		// Entry existed, update its status instead.
-		l.access(en)
+		l.markAccess(en)
 		return nil
 	}
 	// Try to add new entry to the list
@@ -39,7 +39,7 @@ func (l *lruCache) add(en *entry) *entry {
 			// Entry is loaded to the cache but not yet registered.
 			cen.accessList = l.ls.PushFront(cen)
 		} else {
-			l.access(cen)
+			l.markAccess(cen)
 		}
 	}
 	if l.cap > 0 && l.ls.Len() > l.cap {
@@ -50,16 +50,16 @@ func (l *lruCache) add(en *entry) *entry {
 	return nil
 }
 
-// hit updates cache entry for a get.
-func (l *lruCache) hit(en *entry) {
+// access updates cache entry for a get.
+func (l *lruCache) access(en *entry) {
 	if en.accessList != nil {
-		l.access(en)
+		l.markAccess(en)
 	}
 }
 
-// access marks the element has just been accessed.
+// markAccess marks the element has just been accessed.
 // en.accessList must not be null.
-func (l *lruCache) access(en *entry) {
+func (l *lruCache) markAccess(en *entry) {
 	l.ls.MoveToFront(en.accessList)
 }
 
@@ -75,9 +75,9 @@ func (l *lruCache) remove(en *entry) *entry {
 	return en
 }
 
-// walkAccess walks through all lists by access time.
-func (l *lruCache) walkAccess(fn func(en *entry) bool) {
-	walkListFromBack(&l.ls, fn)
+// iterate walks through all lists by access time.
+func (l *lruCache) iterate(fn func(en *entry) bool) {
+	iterateListFromBack(&l.ls, fn)
 }
 
 const (
@@ -116,12 +116,12 @@ func (l *slruCache) length() int {
 	return l.probationLs.Len() + l.protectedLs.Len()
 }
 
-// add adds new entry to the cache and returns evicted entry if necessary.
-func (l *slruCache) add(en *entry) *entry {
+// write adds new entry to the cache and returns evicted entry if necessary.
+func (l *slruCache) write(en *entry) *entry {
 	// Fast path
 	if en.accessList != nil {
 		// Entry existed, update its value instead.
-		l.access(en)
+		l.markAccess(en)
 		return nil
 	}
 	// Try to add new entry to the probation segment.
@@ -139,7 +139,7 @@ func (l *slruCache) add(en *entry) *entry {
 			cen.listID = probationSegment
 			cen.accessList = l.probationLs.PushFront(cen)
 		} else {
-			l.access(cen)
+			l.markAccess(cen)
 		}
 	}
 	// The probation list can exceed its capacity if number of entries
@@ -153,16 +153,16 @@ func (l *slruCache) add(en *entry) *entry {
 	return nil
 }
 
-// hit updates cache entry for a get.
-func (l *slruCache) hit(en *entry) {
+// access updates cache entry for a get.
+func (l *slruCache) access(en *entry) {
 	if en.accessList != nil {
-		l.access(en)
+		l.markAccess(en)
 	}
 }
 
-// access marks the element has just been accessed.
+// markAccess marks the element has just been accessed.
 // en.accessList must not be null.
-func (l *slruCache) access(en *entry) {
+func (l *slruCache) markAccess(en *entry) {
 	if en.listID == protectedSegment {
 		// Already in the protected segment.
 		l.protectedLs.MoveToFront(en.accessList)
@@ -211,20 +211,8 @@ func (l *slruCache) victim() *entry {
 	return getEntry(el)
 }
 
-// walkAccess walks through all lists by access time.
-func (l *slruCache) walkAccess(fn func(en *entry) bool) {
-	_ = walkListFromBack(&l.protectedLs, fn) &&
-		walkListFromBack(&l.probationLs, fn)
-}
-
-func walkListFromBack(ls *list.List, fn func(en *entry) bool) bool {
-	for el := ls.Back(); el != nil; {
-		en := getEntry(el)
-		prev := el.Prev() // Get Prev as fn can delete the entry.
-		if !fn(en) {
-			return false
-		}
-		el = prev
-	}
-	return true
+// iterate walks through all lists by access time.
+func (l *slruCache) iterate(fn func(en *entry) bool) {
+	iterateListFromBack(&l.protectedLs, fn)
+	iterateListFromBack(&l.probationLs, fn)
 }
