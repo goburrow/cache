@@ -40,8 +40,8 @@ func main() {
 	// Create a new cache
 	c := cache.NewLoadingCache(load,
 		cache.WithMaximumSize(1000),
-		cache.WithExpireAfterAccess(10*time.Second),
-		cache.WithRefreshAfterWrite(60*time.Second),
+		cache.WithExpireAfterAccess(10*time.Minute),
+		cache.WithRefreshAfterWrite(30*time.Minute),
 	)
 
 	getTicker := time.Tick(10 * time.Millisecond)

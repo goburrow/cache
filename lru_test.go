@@ -80,14 +80,14 @@ func TestLRU(t *testing.T) {
 	s.lru.init(&s.c, 3)
 
 	en := createLRUEntries(4)
-	remEn := s.lru.add(en[0])
+	remEn := s.lru.write(en[0])
 	// 0
 	if remEn != nil {
 		t.Fatalf("unexpected entry removed: %v", remEn)
 	}
 	s.assertLRULen(1)
 	s.assertLRUEntry(0)
-	remEn = s.lru.add(en[1])
+	remEn = s.lru.write(en[1])
 	// 1 0
 	if remEn != nil {
 		t.Fatalf("unexpected entry removed: %v", remEn)
@@ -96,17 +96,17 @@ func TestLRU(t *testing.T) {
 	s.assertLRUEntry(1)
 	s.assertLRUEntry(0)
 
-	s.lru.hit(en[0])
+	s.lru.access(en[0])
 	// 0 1
 
-	remEn = s.lru.add(en[2])
+	remEn = s.lru.write(en[2])
 	// 2 0 1
 	if remEn != nil {
 		t.Fatalf("unexpected entry removed: %+v", remEn)
 	}
 	s.assertLRULen(3)
 
-	remEn = s.lru.add(en[3])
+	remEn = s.lru.write(en[3])
 	// 3 2 0
 	s.assertEntry(remEn, 1, "1", 0)
 	s.assertLRULen(3)
@@ -128,23 +128,23 @@ func TestLRUWalk(t *testing.T) {
 
 	entries := createLRUEntries(6)
 	for _, e := range entries {
-		s.lru.add(e)
+		s.lru.write(e)
 	}
 	// 5 4 3 2 1
 	found := ""
-	s.lru.walkAccess(func(en *entry) bool {
+	s.lru.iterate(func(en *entry) bool {
 		found += en.getValue().(string) + " "
 		return true
 	})
 	if found != "1 2 3 4 5 " {
 		t.Fatalf("unexpected entries: %v", found)
 	}
-	s.lru.hit(entries[1])
-	s.lru.hit(entries[5])
-	s.lru.hit(entries[3])
+	s.lru.access(entries[1])
+	s.lru.access(entries[5])
+	s.lru.access(entries[3])
 	// 3 5 1 4 2
 	found = ""
-	s.lru.walkAccess(func(en *entry) bool {
+	s.lru.iterate(func(en *entry) bool {
 		found += en.getValue().(string) + " "
 		if en.key.(int)%2 == 0 {
 			s.lru.remove(en)
@@ -168,7 +168,7 @@ func TestSegmentedLRU(t *testing.T) {
 
 	en := createLRUEntries(5)
 
-	remEn := s.slru.add(en[0])
+	remEn := s.slru.write(en[0])
 	// - | 0
 	if remEn != nil {
 		t.Fatalf("unexpected entry removed: %v", remEn)
@@ -176,7 +176,7 @@ func TestSegmentedLRU(t *testing.T) {
 	s.assertSLRULen(0, 1)
 	s.assertSLRUEntry(0, probationSegment)
 
-	remEn = s.slru.add(en[1])
+	remEn = s.slru.write(en[1])
 	// - | 1 0
 	if remEn != nil {
 		t.Fatalf("unexpected entry removed: %v", remEn)
@@ -184,19 +184,19 @@ func TestSegmentedLRU(t *testing.T) {
 	s.assertSLRULen(0, 2)
 	s.assertSLRUEntry(1, probationSegment)
 
-	s.slru.hit(en[1])
+	s.slru.access(en[1])
 	// 1 | 0
 	s.assertSLRULen(1, 1)
 	s.assertSLRUEntry(1, protectedSegment)
 	s.assertSLRUEntry(0, probationSegment)
 
-	s.slru.hit(en[0])
+	s.slru.access(en[0])
 	// 0 1 | -
 	s.assertSLRULen(2, 0)
 	s.assertSLRUEntry(0, protectedSegment)
 	s.assertSLRUEntry(1, protectedSegment)
 
-	remEn = s.slru.add(en[2])
+	remEn = s.slru.write(en[2])
 	// 0 1 | 2
 	if remEn != nil {
 		t.Fatalf("unexpected entry removed: %+v", remEn)
@@ -204,18 +204,18 @@ func TestSegmentedLRU(t *testing.T) {
 	s.assertSLRULen(2, 1)
 	s.assertSLRUEntry(2, probationSegment)
 
-	remEn = s.slru.add(en[3])
+	remEn = s.slru.write(en[3])
 	// 0 1 | 3
 	s.assertSLRULen(2, 1)
 	s.assertEntry(remEn, 2, "2", probationSegment)
 	s.assertSLRUEntry(3, probationSegment)
 
-	s.slru.hit(en[3])
+	s.slru.access(en[3])
 	// 3 0 | 1
 	s.assertSLRULen(2, 1)
 	s.assertSLRUEntry(3, protectedSegment)
 
-	remEn = s.slru.add(en[4])
+	remEn = s.slru.write(en[4])
 	// 3 0 | 4
 	s.assertSLRULen(2, 1)
 	s.assertEntry(remEn, 1, "1", probationSegment)
@@ -234,23 +234,23 @@ func TestSLRUWalk(t *testing.T) {
 
 	entries := createLRUEntries(10)
 	for _, e := range entries {
-		s.slru.add(e)
+		s.slru.write(e)
 	}
 	// | 9 8 7 6 5 4
 	found := ""
-	s.slru.walkAccess(func(en *entry) bool {
+	s.slru.iterate(func(en *entry) bool {
 		found += en.getValue().(string) + " "
 		return true
 	})
 	if found != "4 5 6 7 8 9 " {
 		t.Fatalf("unexpected entries: %v", found)
 	}
-	s.slru.hit(entries[7])
-	s.slru.hit(entries[5])
-	s.slru.hit(entries[8])
+	s.slru.access(entries[7])
+	s.slru.access(entries[5])
+	s.slru.access(entries[8])
 	// 8 5 7 | 9 6 4
 	found = ""
-	s.slru.walkAccess(func(en *entry) bool {
+	s.slru.iterate(func(en *entry) bool {
 		found += en.getValue().(string) + " "
 		if en.key.(int)%2 == 0 {
 			s.slru.remove(en)

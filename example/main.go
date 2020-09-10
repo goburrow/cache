@@ -10,21 +10,29 @@ import (
 
 func main() {
 	load := func(k cache.Key) (cache.Value, error) {
-		return fmt.Sprintf("%d", k), nil
+		fmt.Printf("loading %v\n", k)
+		time.Sleep(500 * time.Millisecond)
+		return fmt.Sprintf("%d-%d", k, time.Now().Unix()), nil
+	}
+	remove := func(k cache.Key, v cache.Value) {
+		fmt.Printf("removed %v (%v)\n", k, v)
 	}
 	// Create a new cache
 	c := cache.NewLoadingCache(load,
 		cache.WithMaximumSize(1000),
-		cache.WithExpireAfterAccess(10*time.Second),
-		cache.WithRefreshAfterWrite(60*time.Second),
+		cache.WithExpireAfterAccess(30*time.Second),
+		cache.WithRefreshAfterWrite(20*time.Second),
+		cache.WithRemovalListener(remove),
 	)
 
-	getTicker := time.Tick(10 * time.Millisecond)
-	reportTicker := time.Tick(1 * time.Second)
+	getTicker := time.Tick(2 * time.Second)
+	reportTicker := time.Tick(30 * time.Second)
 	for {
 		select {
 		case <-getTicker:
-			_, _ = c.Get(rand.Intn(2000))
+			k := rand.Intn(100)
+			v, _ := c.Get(k)
+			fmt.Printf("get %v: %v\n", k, v)
 		case <-reportTicker:
 			st := cache.Stats{}
 			c.Stats(&st)
