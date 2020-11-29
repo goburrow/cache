@@ -15,19 +15,22 @@ const (
 
 // entry stores cached entry key and value.
 type entry struct {
-	key   Key
-	value atomic.Value // Store value
+	// Structs with first field align to 64 bits will also be aligned to 64.
+	// https://golang.org/pkg/sync/atomic/#pkg-note-BUG
 
 	// hash is the hash value of this entry key
 	hash uint64
 	// accessTime is the last time this entry was accessed.
-	accessTime int64
+	accessTime int64 // Access atomically - must be aligned on 32-bit
 	// writeTime is the last time this entry was updated.
-	writeTime int64
+	writeTime int64 // Access atomically - must be aligned on 32-bit
 
 	// FIXME: More efficient way to store boolean flags
-	invalidated uint32
-	loading     uint32
+	invalidated int32
+	loading     int32
+
+	key   Key
+	value atomic.Value // Store value
 
 	// These properties are managed by only cache policy so do not need atomic access.
 
@@ -73,25 +76,25 @@ func (e *entry) setWriteTime(v int64) {
 }
 
 func (e *entry) getLoading() bool {
-	return atomic.LoadUint32(&e.loading) != 0
+	return atomic.LoadInt32(&e.loading) != 0
 }
 
 func (e *entry) setLoading(v bool) bool {
 	if v {
-		return atomic.CompareAndSwapUint32(&e.loading, 0, 1)
+		return atomic.CompareAndSwapInt32(&e.loading, 0, 1)
 	}
-	return atomic.CompareAndSwapUint32(&e.loading, 1, 0)
+	return atomic.CompareAndSwapInt32(&e.loading, 1, 0)
 }
 
 func (e *entry) getInvalidated() bool {
-	return atomic.LoadUint32(&e.invalidated) != 0
+	return atomic.LoadInt32(&e.invalidated) != 0
 }
 
 func (e *entry) setInvalidated(v bool) {
 	if v {
-		atomic.StoreUint32(&e.invalidated, 1)
+		atomic.StoreInt32(&e.invalidated, 1)
 	} else {
-		atomic.StoreUint32(&e.invalidated, 0)
+		atomic.StoreInt32(&e.invalidated, 0)
 	}
 }
 
@@ -117,8 +120,8 @@ type entryEvent struct {
 
 // cache is a data structure for cache entries.
 type cache struct {
+	size int64                  // Access atomically - must be aligned on 32-bit
 	segs [segmentCount]sync.Map // map[Key]*entry
-	size int64
 }
 
 func (c *cache) get(k Key, h uint64) *entry {

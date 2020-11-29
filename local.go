@@ -22,11 +22,14 @@ var currentTime = time.Now
 
 // localCache is an asynchronous LRU cache.
 type localCache struct {
+	// internal data structure
+	cache cache // Must be aligned on 32-bit
+
 	// user configurations
-	policyName        string
 	expireAfterAccess time.Duration
 	expireAfterWrite  time.Duration
 	refreshAfterWrite time.Duration
+	policyName        string
 
 	onInsertion Func
 	onRemoval   Func
@@ -35,9 +38,8 @@ type localCache struct {
 	exec   Executor
 	stats  StatsCounter
 
-	// internal data structure
-	cache cache
-	cap   int
+	// cap is the cache capacity.
+	cap int
 
 	// accessQueue is the cache retention policy, which manages entries by access time.
 	accessQueue policy

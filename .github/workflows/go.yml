@@ -25,4 +25,6 @@ jobs:
       run: go build -v
 
     - name: Test
-      run: go test -v -bench . -race
+      run: |
+        go test -v -bench . -race
+        GOARCH=386 go test -v
