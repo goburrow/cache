@@ -29,7 +29,7 @@ type entry struct {
 	invalidated int32
 	loading     int32
 
-	key   Key
+	key   interface{}
 	value atomic.Value // Store value
 
 	// These properties are managed by only cache policy so do not need atomic access.
@@ -42,7 +42,7 @@ type entry struct {
 	listID uint8
 }
 
-func newEntry(k Key, v Value, h uint64) *entry {
+func newEntry(k interface{}, v interface{}, h uint64) *entry {
 	en := &entry{
 		key:  k,
 		hash: h,
@@ -51,11 +51,11 @@ func newEntry(k Key, v Value, h uint64) *entry {
 	return en
 }
 
-func (e *entry) getValue() Value {
-	return e.value.Load().(Value)
+func (e *entry) getValue() interface{} {
+	return e.value.Load()
 }
 
-func (e *entry) setValue(v Value) {
+func (e *entry) setValue(v interface{}) {
 	e.value.Store(v)
 }
 
@@ -124,7 +124,7 @@ type cache struct {
 	segs [segmentCount]sync.Map // map[Key]*entry
 }
 
-func (c *cache) get(k Key, h uint64) *entry {
+func (c *cache) get(k interface{}, h uint64) *entry {
 	seg := c.segment(h)
 	v, ok := seg.Load(k)
 	if ok {

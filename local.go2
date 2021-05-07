@@ -21,7 +21,7 @@ const (
 var currentTime = time.Now
 
 // localCache is an asynchronous LRU cache.
-type localCache struct {
+type localCache[K comparable, V any] struct {
 	// internal data structure
 	cache cache // Must be aligned on 32-bit
 
@@ -31,10 +31,10 @@ type localCache struct {
 	refreshAfterWrite time.Duration
 	policyName        string
 
-	onInsertion Func
-	onRemoval   Func
+	onInsertion Func[K, V]
+	onRemoval   Func[K, V]
 
-	loader LoaderFunc
+	loader LoaderFunc[K, V]
 	exec   Executor
 	stats  StatsCounter
 
@@ -59,8 +59,8 @@ type localCache struct {
 
 // newLocalCache returns a default localCache.
 // init must be called before this cache can be used.
-func newLocalCache() *localCache {
-	return &localCache{
+func newLocalCache[K comparable, V any]() *localCache[K, V] {
+	return &localCache[K, V]{
 		cap:   maximumCapacity,
 		cache: cache{},
 		stats: &statsCounter{},
@@ -68,7 +68,7 @@ func newLocalCache() *localCache {
 }
 
 // init initializes cache replacement policy after all user configuration properties are set.
-func (c *localCache) init() {
+func (c *localCache[K, V]) init() {
 	c.accessQueue = newPolicy(c.policyName)
 	c.accessQueue.init(&c.cache, c.cap)
 	if c.expireAfterWrite > 0 || c.refreshAfterWrite > 0 {
@@ -85,7 +85,7 @@ func (c *localCache) init() {
 
 // Close implements io.Closer and always returns a nil error.
 // Caller would ensure the cache is not being used (reading and writing) before closing.
-func (c *localCache) Close() error {
+func (c *localCache[K, V]) Close() error {
 	if atomic.CompareAndSwapInt32(&c.closing, 0, 1) {
 		// Do not close events channel to avoid panic when cache is still being used.
 		c.events <- entryEvent{nil, eventClose}
@@ -97,26 +97,26 @@ func (c *localCache) Close() error {
 
 // GetIfPresent gets cached value from entries list and updates
 // last access time for the entry if it is found.
-func (c *localCache) GetIfPresent(k Key) (Value, bool) {
+func (c *localCache[K, V]) GetIfPresent(k K) (v V, exist bool) {
 	en := c.cache.get(k, sum(k))
 	if en == nil {
 		c.stats.RecordMisses(1)
-		return nil, false
+		return v, false
 	}
 	now := currentTime()
 	if c.isExpired(en, now) {
 		c.stats.RecordMisses(1)
 		c.sendEvent(eventDelete, en)
-		return nil, false
+		return v, false
 	}
 	c.stats.RecordHits(1)
 	c.setEntryAccessTime(en, now)
 	c.sendEvent(eventAccess, en)
-	return en.getValue(), true
+	return en.getValue().(V), true
 }
 
 // Put adds new entry to entries list.
-func (c *localCache) Put(k Key, v Value) {
+func (c *localCache[K, V]) Put(k K, v V) {
 	h := sum(k)
 	en := c.cache.get(k, h)
 	now := currentTime()
@@ -142,7 +142,7 @@ func (c *localCache) Put(k Key, v Value) {
 }
 
 // Invalidate removes the entry associated with key k.
-func (c *localCache) Invalidate(k Key) {
+func (c *localCache[K, V]) Invalidate(k K) {
 	en := c.cache.get(k, sum(k))
 	if en != nil {
 		en.setInvalidated(true)
@@ -151,7 +151,7 @@ func (c *localCache) Invalidate(k Key) {
 }
 
 // InvalidateAll resets entries list.
-func (c *localCache) InvalidateAll() {
+func (c *localCache[K, V]) InvalidateAll() {
 	c.cache.walk(func(en *entry) {
 		en.setInvalidated(true)
 	})
@@ -161,7 +161,7 @@ func (c *localCache) InvalidateAll() {
 // Get returns value associated with k or call underlying loader to retrieve value
 // if it is not in the cache. The returned value is only cached when loader returns
 // nil error.
-func (c *localCache) Get(k Key) (Value, error) {
+func (c *localCache[K, V]) Get(k K) (V, error) {
 	en := c.cache.get(k, sum(k))
 	if en == nil {
 		c.stats.RecordMisses(1)
@@ -184,12 +184,12 @@ func (c *localCache) Get(k Key) (Value, error) {
 		c.setEntryAccessTime(en, now)
 		c.sendEvent(eventAccess, en)
 	}
-	return en.getValue(), nil
+	return en.getValue().(V), nil
 }
 
-// Refresh asynchronously reloads value for Key if it existed, otherwise
+// Refresh asynchronously reloads value for key k if it existed, otherwise
 // it will synchronously load and block until it value is loaded.
-func (c *localCache) Refresh(k Key) {
+func (c *localCache[K, V]) Refresh(k K) {
 	if c.loader == nil {
 		return
 	}
@@ -202,11 +202,11 @@ func (c *localCache) Refresh(k Key) {
 }
 
 // Stats copies cache stats to t.
-func (c *localCache) Stats(t *Stats) {
+func (c *localCache[K, V]) Stats(t *Stats) {
 	c.stats.Snapshot(t)
 }
 
-func (c *localCache) processEntries() {
+func (c *localCache[K, V]) processEntries() {
 	defer c.closeWG.Done()
 	for e := range c.events {
 		switch e.event {
@@ -235,32 +235,32 @@ func (c *localCache) processEntries() {
 }
 
 // sendEvent sends event only when the cache is not closing/closed.
-func (c *localCache) sendEvent(typ event, en *entry) {
+func (c *localCache[K, V]) sendEvent(typ event, en *entry) {
 	if atomic.LoadInt32(&c.closing) == 0 {
 		c.events <- entryEvent{en, typ}
 	}
 }
 
 // This function must only be called from processEntries goroutine.
-func (c *localCache) write(en *entry) {
+func (c *localCache[K, V]) write(en *entry) {
 	ren := c.accessQueue.write(en)
 	c.writeQueue.write(en)
 	if c.onInsertion != nil {
-		c.onInsertion(en.key, en.getValue())
+		c.onInsertion(en.key.(K), en.getValue().(V))
 	}
 	if ren != nil {
 		c.writeQueue.remove(ren)
 		// An entry has been evicted
 		c.stats.RecordEviction()
 		if c.onRemoval != nil {
-			c.onRemoval(ren.key, ren.getValue())
+			c.onRemoval(ren.key.(K), ren.getValue().(V))
 		}
 	}
 }
 
 // removeAll remove all entries in the cache.
 // This function must only be called from processEntries goroutine.
-func (c *localCache) removeAll() {
+func (c *localCache[K, V]) removeAll() {
 	c.accessQueue.iterate(func(en *entry) bool {
 		c.remove(en)
 		return true
@@ -269,34 +269,34 @@ func (c *localCache) removeAll() {
 
 // remove removes the given element from the cache and entries list.
 // It also calls onRemoval callback if it is set.
-func (c *localCache) remove(en *entry) {
+func (c *localCache[K, V]) remove(en *entry) {
 	ren := c.accessQueue.remove(en)
 	c.writeQueue.remove(en)
 	if ren != nil && c.onRemoval != nil {
-		c.onRemoval(ren.key, ren.getValue())
+		c.onRemoval(ren.key.(K), ren.getValue().(V))
 	}
 }
 
 // access moves the given element to the top of the entries list.
 // This function must only be called from processEntries goroutine.
-func (c *localCache) access(en *entry) {
+func (c *localCache[K, V]) access(en *entry) {
 	c.accessQueue.access(en)
 }
 
 // load uses current loader to synchronously retrieve value for k and adds new
 // entry to the cache only if loader returns a nil error.
-func (c *localCache) load(k Key) (Value, error) {
+func (c *localCache[K, V]) load(k K) (v V, err error) {
 	if c.loader == nil {
 		panic("cache loader function must be set")
 	}
 	// TODO: Poll the value instead when the entry is loading.
 	start := currentTime()
-	v, err := c.loader(k)
+	v, err = c.loader(k)
 	now := currentTime()
 	loadTime := now.Sub(start)
 	if err != nil {
 		c.stats.RecordLoadError(loadTime)
-		return nil, err
+		return v, err
 	}
 	c.stats.RecordLoadSuccess(loadTime)
 	en := newEntry(k, v, sum(k))
@@ -307,7 +307,7 @@ func (c *localCache) load(k Key) (Value, error) {
 }
 
 // refreshAsync reloads value in a go routine or using custom executor if defined.
-func (c *localCache) refreshAsync(en *entry) bool {
+func (c *localCache[K, V]) refreshAsync(en *entry) bool {
 	if c.loader == nil {
 		panic("cache loader function must be set")
 	}
@@ -326,11 +326,11 @@ func (c *localCache) refreshAsync(en *entry) bool {
 // refresh reloads value for the given key. If loader returns an error,
 // that error will be omitted. Otherwise, the entry value will be updated.
 // This function would only be called by refreshAsync.
-func (c *localCache) refresh(en *entry) {
+func (c *localCache[K, V]) refresh(en *entry) {
 	defer en.setLoading(false)
 
 	start := currentTime()
-	v, err := c.loader(en.key)
+	v, err := c.loader(en.key.(K))
 	now := currentTime()
 	loadTime := now.Sub(start)
 	if err == nil {
@@ -346,7 +346,7 @@ func (c *localCache) refresh(en *entry) {
 
 // postReadCleanup is run after entry access/delete event.
 // This function must only be called from processEntries goroutine.
-func (c *localCache) postReadCleanup() {
+func (c *localCache[K, V]) postReadCleanup() {
 	if atomic.AddInt32(&c.readCount, 1) > drainThreshold {
 		atomic.StoreInt32(&c.readCount, 0)
 		c.expireEntries()
@@ -355,13 +355,13 @@ func (c *localCache) postReadCleanup() {
 
 // postWriteCleanup is run after entry add event.
 // This function must only be called from processEntries goroutine.
-func (c *localCache) postWriteCleanup() {
+func (c *localCache[K, V]) postWriteCleanup() {
 	atomic.StoreInt32(&c.readCount, 0)
 	c.expireEntries()
 }
 
 // expireEntries removes expired entries.
-func (c *localCache) expireEntries() {
+func (c *localCache[K, V]) expireEntries() {
 	remain := drainMax
 	now := currentTime()
 	if c.expireAfterAccess > 0 {
@@ -409,7 +409,7 @@ func (c *localCache) expireEntries() {
 	}
 }
 
-func (c *localCache) isExpired(en *entry, now time.Time) bool {
+func (c *localCache[K, V]) isExpired(en *entry, now time.Time) bool {
 	if en.getInvalidated() {
 		return true
 	}
@@ -424,7 +424,7 @@ func (c *localCache) isExpired(en *entry, now time.Time) bool {
 	return false
 }
 
-func (c *localCache) needRefresh(en *entry, now time.Time) bool {
+func (c *localCache[K, V]) needRefresh(en *entry, now time.Time) bool {
 	if en.getLoading() {
 		return false
 	}
@@ -439,22 +439,22 @@ func (c *localCache) needRefresh(en *entry, now time.Time) bool {
 }
 
 // setEntryAccessTime sets access time if needed.
-func (c *localCache) setEntryAccessTime(en *entry, now time.Time) {
+func (c *localCache[K, V]) setEntryAccessTime(en *entry, now time.Time) {
 	if c.expireAfterAccess > 0 {
 		en.setAccessTime(now.UnixNano())
 	}
 }
 
 // setEntryWriteTime sets write time if needed.
-func (c *localCache) setEntryWriteTime(en *entry, now time.Time) {
+func (c *localCache[K, V]) setEntryWriteTime(en *entry, now time.Time) {
 	if c.expireAfterWrite > 0 || c.refreshAfterWrite > 0 {
 		en.setWriteTime(now.UnixNano())
 	}
 }
 
 // New returns a local in-memory Cache.
-func New(options ...Option) Cache {
-	c := newLocalCache()
+func New[K comparable, V any](options ...Option[K, V]) Cache[K, V] {
+	c := newLocalCache[K, V]()
 	for _, opt := range options {
 		opt(c)
 	}
@@ -464,8 +464,8 @@ func New(options ...Option) Cache {
 
 // NewLoadingCache returns a new LoadingCache with given loader function
 // and cache options.
-func NewLoadingCache(loader LoaderFunc, options ...Option) LoadingCache {
-	c := newLocalCache()
+func NewLoadingCache[K comparable, V any](loader LoaderFunc[K, V], options ...Option[K, V]) LoadingCache[K, V] {
+	c := newLocalCache[K, V]()
 	c.loader = loader
 	for _, opt := range options {
 		opt(c)
@@ -475,65 +475,65 @@ func NewLoadingCache(loader LoaderFunc, options ...Option) LoadingCache {
 }
 
 // Option add options for default Cache.
-type Option func(c *localCache)
+type Option[K comparable, V any] func(c *localCache[K, V])
 
 // WithMaximumSize returns an Option which sets maximum size for the cache.
 // Any non-positive numbers is considered as unlimited.
-func WithMaximumSize(size int) Option {
+func WithMaximumSize[K comparable, V any](size int) Option[K, V] {
 	if size < 0 {
 		size = 0
 	}
 	if size > maximumCapacity {
 		size = maximumCapacity
 	}
-	return func(c *localCache) {
+	return func(c *localCache[K, V]) {
 		c.cap = size
 	}
 }
 
 // WithRemovalListener returns an Option to set cache to call onRemoval for each
 // entry evicted from the cache.
-func WithRemovalListener(onRemoval Func) Option {
-	return func(c *localCache) {
+func WithRemovalListener[K comparable, V any](onRemoval Func[K, V]) Option[K, V] {
+	return func(c *localCache[K, V]) {
 		c.onRemoval = onRemoval
 	}
 }
 
 // WithExpireAfterAccess returns an option to expire a cache entry after the
 // given duration without being accessed.
-func WithExpireAfterAccess(d time.Duration) Option {
-	return func(c *localCache) {
+func WithExpireAfterAccess[K comparable, V any](d time.Duration) Option[K, V] {
+	return func(c *localCache[K, V]) {
 		c.expireAfterAccess = d
 	}
 }
 
 // WithExpireAfterWrite returns an option to expire a cache entry after the
 // given duration from creation.
-func WithExpireAfterWrite(d time.Duration) Option {
-	return func(c *localCache) {
+func WithExpireAfterWrite[K comparable, V any](d time.Duration) Option[K, V] {
+	return func(c *localCache[K, V]) {
 		c.expireAfterWrite = d
 	}
 }
 
 // WithRefreshAfterWrite returns an option to refresh a cache entry after the
 // given duration. This option is only applicable for LoadingCache.
-func WithRefreshAfterWrite(d time.Duration) Option {
-	return func(c *localCache) {
+func WithRefreshAfterWrite[K comparable, V any](d time.Duration) Option[K, V] {
+	return func(c *localCache[K, V]) {
 		c.refreshAfterWrite = d
 	}
 }
 
 // WithStatsCounter returns an option which overrides default cache stats counter.
-func WithStatsCounter(st StatsCounter) Option {
-	return func(c *localCache) {
+func WithStatsCounter[K comparable, V any](st StatsCounter) Option[K, V] {
+	return func(c *localCache[K, V]) {
 		c.stats = st
 	}
 }
 
 // WithPolicy returns an option which sets cache policy associated to the given name.
 // Supported policies are: lru, slru, tinylfu.
-func WithPolicy(name string) Option {
-	return func(c *localCache) {
+func WithPolicy[K comparable, V any](name string) Option[K, V] {
+	return func(c *localCache[K, V]) {
 		c.policyName = name
 	}
 }
@@ -541,15 +541,15 @@ func WithPolicy(name string) Option {
 // WithExecutor returns an option which sets executor for cache loader.
 // By default, each asynchronous reload is run in a go routine.
 // This option is only applicable for LoadingCache.
-func WithExecutor(executor Executor) Option {
-	return func(c *localCache) {
+func WithExecutor[K comparable, V any](executor Executor) Option[K, V] {
+	return func(c *localCache[K, V]) {
 		c.exec = executor
 	}
 }
 
 // withInsertionListener is used for testing.
-func withInsertionListener(onInsertion Func) Option {
-	return func(c *localCache) {
+func withInsertionListener[K comparable, V any](onInsertion Func[K, V]) Option[K, V] {
+	return func(c *localCache[K, V]) {
 		c.onInsertion = onInsertion
 	}
 }

@@ -60,6 +60,22 @@ func main() {
 }
 ```
 
+## Generics
+See https://go.googlesource.com/go/+/refs/heads/dev.go2go/README.go2go.md and
+https://go.googlesource.com/proposal/+/refs/heads/master/design/43651-type-parameters.md
+
+Build go2go tool:
+```
+cd /path/to/goroot
+git checkout dev.go2go
+cd src
+./all.bash
+```
+
+```
+go tool go2go test .
+```
+
 ## Performance
 
 See [traces](traces/) and [benchmark](https://github.com/goburrow/cache/wiki/Benchmark)

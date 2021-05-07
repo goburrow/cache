@@ -9,12 +9,12 @@ import (
 )
 
 func main() {
-	load := func(k cache.Key) (cache.Value, error) {
+	load := func(k int) (string, error) {
 		fmt.Printf("loading %v\n", k)
 		time.Sleep(500 * time.Millisecond)
 		return fmt.Sprintf("%d-%d", k, time.Now().Unix()), nil
 	}
-	remove := func(k cache.Key, v cache.Value) {
+	remove := func(k int, v string) {
 		fmt.Printf("removed %v (%v)\n", k, v)
 	}
 	// Create a new cache

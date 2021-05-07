@@ -5,6 +5,14 @@ import (
 	"testing"
 )
 
+func cacheSize(c *cache) int {
+	length := 0
+	c.walk(func(*entry) {
+		length++
+	})
+	return length
+}
+
 func BenchmarkCacheSegment(b *testing.B) {
 	c := cache{}
 	const count = 1 << 10
