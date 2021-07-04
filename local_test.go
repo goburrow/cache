@@ -381,21 +381,23 @@ func TestGetIfPresentExpired(t *testing.T) {
 	}
 }
 
-func TestSynchronousReload(t *testing.T) {
+func TestLoadingAsyncReload(t *testing.T) {
 	var val Value
 	loader := func(k Key) (Value, error) {
-		time.Sleep(1 * time.Millisecond)
 		if val == nil {
 			return nil, errors.New("nil")
 		}
 		return val, nil
 	}
-	c := NewLoadingCache(loader, WithExpireAfterWrite(1*time.Second), WithExecutor(syncExecutor{}))
+	mockTime := newMockTime()
+	currentTime = mockTime.now
+	c := NewLoadingCache(loader, WithExpireAfterWrite(5*time.Millisecond), WithExecutor(syncExecutor{}))
 	val = "a"
 	v, err := c.Get(1)
 	if err != nil || v != val {
 		t.Fatalf("unexpected get %v %v", v, err)
 	}
+	mockTime.add(50 * time.Millisecond)
 	val = "b"
 	v, err = c.Get(1)
 	if err != nil || v != val {
@@ -405,6 +407,34 @@ func TestSynchronousReload(t *testing.T) {
 	v, err = c.Get(2)
 	if v != nil || err == nil || err.Error() != "nil" {
 		t.Fatalf("expect error: actual %v %v", v, err)
+	}
+}
+
+func TestLoadingRefresh(t *testing.T) {
+	count := 0
+	c := NewLoadingCache(func(key Key) (Value, error) {
+		count++
+		return count, nil
+	})
+	for i := 10; i > 0; i-- {
+		v, _ := c.Get(1)
+		if v.(int) != 1 {
+			t.Fatalf("expect value loaded, actual: %v", v)
+		}
+		v, ok := c.GetIfPresent(1)
+		if !ok || v != 1 {
+			t.Fatalf("expect value present, actual: %v %v", v, ok)
+		}
+	}
+	c.Refresh(2)
+	v, _ := c.Get(2)
+	if v.(int) != 2 {
+		t.Fatalf("expect new value loaded, actual: %v", v)
+	}
+	c.Put(2, 3)
+	v, _ = c.Get(2)
+	if v.(int) != 3 {
+		t.Fatalf("expect new value, actual: %v", v)
 	}
 }
 

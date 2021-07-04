@@ -105,13 +105,13 @@ func (c *localCache) GetIfPresent(k Key) (Value, bool) {
 	}
 	now := currentTime()
 	if c.isExpired(en, now) {
-		c.stats.RecordMisses(1)
 		c.sendEvent(eventDelete, en)
+		c.stats.RecordMisses(1)
 		return nil, false
 	}
-	c.stats.RecordHits(1)
 	c.setEntryAccessTime(en, now)
 	c.sendEvent(eventAccess, en)
+	c.stats.RecordHits(1)
 	return en.getValue(), true
 }
 
@@ -130,13 +130,14 @@ func (c *localCache) Put(k Key, v Value) {
 			cen := c.cache.getOrSet(en)
 			if cen != nil {
 				cen.setValue(v)
+				c.setEntryWriteTime(cen, now)
 				en = cen
 			}
 		}
 	} else {
 		// Update value and send notice
 		en.setValue(v)
-		en.setWriteTime(now.UnixNano())
+		c.setEntryWriteTime(en, now)
 	}
 	c.sendEvent(eventWrite, en)
 }
@@ -170,7 +171,6 @@ func (c *localCache) Get(k Key) (Value, error) {
 	// Check if this entry needs to be refreshed
 	now := currentTime()
 	if c.isExpired(en, now) {
-		c.stats.RecordMisses(1)
 		if c.loader == nil {
 			c.sendEvent(eventDelete, en)
 		} else {
@@ -179,10 +179,11 @@ func (c *localCache) Get(k Key) (Value, error) {
 			c.setEntryAccessTime(en, now)
 			c.refreshAsync(en)
 		}
+		c.stats.RecordMisses(1)
 	} else {
-		c.stats.RecordHits(1)
 		c.setEntryAccessTime(en, now)
 		c.sendEvent(eventAccess, en)
+		c.stats.RecordHits(1)
 	}
 	return en.getValue(), nil
 }
@@ -298,11 +299,19 @@ func (c *localCache) load(k Key) (Value, error) {
 		c.stats.RecordLoadError(loadTime)
 		return nil, err
 	}
-	c.stats.RecordLoadSuccess(loadTime)
 	en := newEntry(k, v, sum(k))
 	c.setEntryWriteTime(en, now)
 	c.setEntryAccessTime(en, now)
+	if c.cap == 0 || c.cache.len() < c.cap {
+		cen := c.cache.getOrSet(en)
+		if cen != nil {
+			cen.setValue(v)
+			c.setEntryWriteTime(cen, now)
+			en = cen
+		}
+	}
 	c.sendEvent(eventWrite, en)
+	c.stats.RecordLoadSuccess(loadTime)
 	return v, nil
 }
 
@@ -334,10 +343,10 @@ func (c *localCache) refresh(en *entry) {
 	now := currentTime()
 	loadTime := now.Sub(start)
 	if err == nil {
-		c.stats.RecordLoadSuccess(loadTime)
 		en.setValue(v)
-		en.setWriteTime(now.UnixNano())
+		c.setEntryWriteTime(en, now)
 		c.sendEvent(eventWrite, en)
+		c.stats.RecordLoadSuccess(loadTime)
 	} else {
 		// TODO: Log error
 		c.stats.RecordLoadError(loadTime)
