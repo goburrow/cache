@@ -34,9 +34,9 @@ type localCache struct {
 	onInsertion Func
 	onRemoval   Func
 
-	loader LoaderFunc
-	exec   Executor
-	stats  StatsCounter
+	loader   LoaderFunc
+	reloader Reloader
+	stats    StatsCounter
 
 	// cap is the cache capacity.
 	cap int
@@ -225,9 +225,9 @@ func (c *localCache) processEntries() {
 			}
 			c.postReadCleanup()
 		case eventClose:
-			if c.exec != nil {
+			if c.reloader != nil {
 				// Stop all refresh tasks.
-				c.exec.Close()
+				c.reloader.Close()
 			}
 			c.removeAll()
 			return
@@ -317,15 +317,12 @@ func (c *localCache) load(k Key) (Value, error) {
 
 // refreshAsync reloads value in a go routine or using custom executor if defined.
 func (c *localCache) refreshAsync(en *entry) bool {
-	if c.loader == nil {
-		panic("cache loader function must be set")
-	}
 	if en.setLoading(true) {
 		// Only do refresh if it isn't running.
-		if c.exec == nil {
+		if c.reloader == nil {
 			go c.refresh(en)
 		} else {
-			c.exec.Execute(func() { c.refresh(en) })
+			c.reload(en)
 		}
 		return true
 	}
@@ -351,6 +348,25 @@ func (c *localCache) refresh(en *entry) {
 		// TODO: Log error
 		c.stats.RecordLoadError(loadTime)
 	}
+}
+
+// reload uses user-defined reloader to reloads value.
+func (c *localCache) reload(en *entry) {
+	start := currentTime()
+	setFn := func(newValue Value, err error) {
+		defer en.setLoading(false)
+		now := currentTime()
+		loadTime := now.Sub(start)
+		if err == nil {
+			en.setValue(newValue)
+			c.setEntryWriteTime(en, now)
+			c.sendEvent(eventWrite, en)
+			c.stats.RecordLoadSuccess(loadTime)
+		} else {
+			c.stats.RecordLoadError(loadTime)
+		}
+	}
+	c.reloader.Reload(en.key, en.getValue(), setFn)
 }
 
 // postReadCleanup is run after entry access/delete event.
@@ -547,12 +563,12 @@ func WithPolicy(name string) Option {
 	}
 }
 
-// WithExecutor returns an option which sets executor for cache loader.
+// WithReloader returns an option which sets reloader for a loading cache.
 // By default, each asynchronous reload is run in a go routine.
 // This option is only applicable for LoadingCache.
-func WithExecutor(executor Executor) Option {
+func WithReloader(reloader Reloader) Option {
 	return func(c *localCache) {
-		c.exec = executor
+		c.reloader = reloader
 	}
 }
 

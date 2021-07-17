@@ -323,7 +323,7 @@ func TestRefreshAterWrite(t *testing.T) {
 	mockTime := newMockTime()
 	currentTime = mockTime.now
 	c := NewLoadingCache(loader, WithExpireAfterAccess(4*time.Second), WithRefreshAfterWrite(2*time.Second),
-		WithExecutor(syncExecutor{}), withInsertionListener(insFunc))
+		WithReloader(&syncReloader{loader}), withInsertionListener(insFunc))
 	defer c.Close()
 
 	wg.Add(3)
@@ -391,7 +391,8 @@ func TestLoadingAsyncReload(t *testing.T) {
 	}
 	mockTime := newMockTime()
 	currentTime = mockTime.now
-	c := NewLoadingCache(loader, WithExpireAfterWrite(5*time.Millisecond), WithExecutor(syncExecutor{}))
+	c := NewLoadingCache(loader, WithExpireAfterWrite(5*time.Millisecond),
+		WithReloader(&syncReloader{loader}))
 	val = "a"
 	v, err := c.Get(1)
 	if err != nil || v != val {
@@ -505,12 +506,15 @@ func (t *mockTime) now() time.Time {
 	return t.value
 }
 
-type syncExecutor struct{}
-
-func (syncExecutor) Execute(f func()) {
-	f()
+type syncReloader struct {
+	loaderFn LoaderFunc
 }
 
-func (syncExecutor) Close() error {
+func (s *syncReloader) Reload(k Key, v Value, setFn func(Value, error)) {
+	v, err := s.loaderFn(k)
+	setFn(v, err)
+}
+
+func (s *syncReloader) Close() error {
 	return nil
 }

@@ -56,11 +56,12 @@ type LoadingCache interface {
 // LoaderFunc retrieves the value corresponding to given Key.
 type LoaderFunc func(Key) (Value, error)
 
-// Executor specifies how cache loader is run to refresh value for the Key.
-// By default, it is run in a new go routine.
-type Executor interface {
-	// Execute runs the fn asynchronously.
-	Execute(fn func())
+// Reloader specifies how cache loader is run to refresh value for the given Key.
+// If Reloader is not set, cache values are refreshed in a new go routine.
+type Reloader interface {
+	// Reload should reload the value asynchronously.
+	// Application must call setFunc to set new value or error.
+	Reload(key Key, oldValue Value, setFunc func(Value, error))
 	// Close shuts down all running tasks. Currently, the error returned is not being used.
 	Close() error
 }
