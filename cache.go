@@ -16,6 +16,15 @@ type Cache interface {
 	// if there is no cached value for Key.
 	GetIfPresent(Key) (Value, bool)
 
+	// Get all keys.
+	GetAllKeys() []interface{}
+
+	// Get all values.
+	GetAllValues() []interface{}
+
+	// Get all entries.
+	GetAll() map[interface{}]interface{}
+
 	// Put associates value with Key. If a value is already associated
 	// with Key, the old one will be replaced with Value.
 	Put(Key, Value)
@@ -25,6 +34,9 @@ type Cache interface {
 
 	// InvalidateAll discards all entries.
 	InvalidateAll()
+
+	// Size of cache
+	Size() int
 
 	// Stats copies cache statistics to given Stats pointer.
 	Stats(*Stats)

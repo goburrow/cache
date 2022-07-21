@@ -9,13 +9,7 @@ import (
 )
 
 func TestCache(t *testing.T) {
-	data := []struct {
-		k string
-		v int
-	}{
-		{"1", 1},
-		{"2", 2},
-	}
+	data := map[string]int{"1": 1, "2": 2}
 
 	wg := sync.WaitGroup{}
 	c := New(withInsertionListener(func(Key, Value) {
@@ -24,16 +18,63 @@ func TestCache(t *testing.T) {
 	defer c.Close()
 
 	wg.Add(len(data))
-	for _, d := range data {
-		c.Put(d.k, d.v)
+	for k, v := range data {
+		c.Put(k, v)
 	}
 	wg.Wait()
 
-	for _, d := range data {
-		v, ok := c.GetIfPresent(d.k)
-		if !ok || v.(int) != d.v {
-			t.Fatalf("unexpected value: %v (%v)", v, ok)
+	for k, v := range data {
+		val, ok := c.GetIfPresent(k)
+		if !ok || val.(int) != v {
+			t.Fatalf("unexpected value: %v (%v)", val, ok)
 		}
+	}
+
+	keys := c.GetAllKeys()
+	if len(keys) != len(data) {
+		t.Fatalf("unexpected keys size: %v, want: %v", len(keys), len(data))
+	} else {
+		for _, k := range keys {
+			if _, ok := data[k.(string)]; !ok {
+				t.Fatalf("unexpected key: %v", k)
+			}
+		}
+	}
+
+	values := c.GetAllValues()
+	if len(values) != len(data) {
+		t.Fatalf("unexpected values size: %v, want: %v", len(values), len(data))
+	} else {
+		for _, v := range values {
+			found := false
+			for _, val := range data {
+				if v.(int) == val {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Fatalf("unexpected value: %v", v)
+			}
+		}
+	}
+
+	allValues := c.GetAll()
+	if len(allValues) != len(data) {
+		t.Fatalf("unexpected all entries size: %v, want: %v", len(allValues), len(data))
+	} else {
+		for k, v := range allValues {
+			if val, ok := data[k.(string)]; !ok {
+				t.Fatalf("unexpected key: %v", k)
+			} else if val != v.(int) {
+				t.Fatalf("unexpected value: %v, want: %v", v, val)
+			}
+		}
+	}
+
+	size := c.Size()
+	if size != len(data) {
+		t.Fatalf("unexpected size: %v, want: %v", size, len(data))
 	}
 }
 
