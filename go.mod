@@ -1,3 +1,3 @@
-module github.com/goburrow/cache
+module github.com/pt-nguyen/cache
 
-go 1.13
+go 1.17

@@ -188,6 +188,38 @@ func (c *localCache) Get(k Key) (Value, error) {
 	return en.getValue(), nil
 }
 
+// GetAllKeys returns all keys.
+func (c *localCache) GetAllKeys() []interface{} {
+	keys := make([]interface{}, 0, c.cache.len())
+	c.cache.walk(func(en *entry) {
+		keys = append(keys, en.key)
+	})
+	return keys
+}
+
+// GetAllValues returns all values.
+func (c *localCache) GetAllValues() []interface{} {
+	values := make([]interface{}, 0, c.cache.len())
+	c.cache.walk(func(en *entry) {
+		values = append(values, en.getValue())
+	})
+	return values
+}
+
+// GetAll returns all entries.
+func (c *localCache) GetAll() map[interface{}]interface{} {
+	var values = make(map[interface{}]interface{}, c.cache.len())
+	c.cache.walk(func(en *entry) {
+		values[en.key] = en.getValue()
+	})
+	return values
+}
+
+// Size returns the number of entries in the cache.
+func (c *localCache) Size() int {
+	return c.cache.len()
+}
+
 // Refresh asynchronously reloads value for Key if it existed, otherwise
 // it will synchronously load and block until it value is loaded.
 func (c *localCache) Refresh(k Key) {
