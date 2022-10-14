@@ -2,16 +2,9 @@
 // including support for LRU, Segmented LRU and TinyLFU.
 package cache
 
-// Key is any value which is comparable.
-// See http://golang.org/ref/spec#Comparison_operators for details.
-type Key interface{}
-
-// Value is any value.
-type Value interface{}
-
 // Cache is a key-value cache which entries are added and stayed in the
 // cache until either are evicted or manually invalidated.
-type Cache interface {
+type Cache[Key comparable, Value any] interface {
 	// GetIfPresent returns value associated with Key or (nil, false)
 	// if there is no cached value for Key.
 	GetIfPresent(Key) (Value, bool)
@@ -36,12 +29,12 @@ type Cache interface {
 }
 
 // Func is a generic callback for entry events in the cache.
-type Func func(Key, Value)
+type Func[Key comparable, Value any] func(Key, Value)
 
 // LoadingCache is a cache with values are loaded automatically and stored
 // in the cache until either evicted or manually invalidated.
-type LoadingCache interface {
-	Cache
+type LoadingCache[Key comparable, Value any] interface {
+	Cache[Key, Value]
 
 	// Get returns value associated with Key or call underlying LoaderFunc
 	// to load value if it is not present.
@@ -54,11 +47,11 @@ type LoadingCache interface {
 }
 
 // LoaderFunc retrieves the value corresponding to given Key.
-type LoaderFunc func(Key) (Value, error)
+type LoaderFunc[Key comparable, Value any] func(Key) (Value, error)
 
 // Reloader specifies how cache loader is run to refresh value for the given Key.
 // If Reloader is not set, cache values are refreshed in a new go routine.
-type Reloader interface {
+type Reloader[Key comparable, Value any] interface {
 	// Reload should reload the value asynchronously.
 	// Application must call setFunc to set new value or error.
 	Reload(key Key, oldValue Value, setFunc func(Value, error))

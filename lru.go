@@ -5,21 +5,21 @@ import (
 )
 
 // lruCache is a LRU cache.
-type lruCache struct {
-	cache *cache
+type lruCache[Key comparable, Value any] struct {
+	cache *cache[Key, Value]
 	cap   int
 	ls    list.List
 }
 
 // init initializes cache list.
-func (l *lruCache) init(c *cache, cap int) {
+func (l *lruCache[Key, Value]) init(c *cache[Key, Value], cap int) {
 	l.cache = c
 	l.cap = cap
 	l.ls.Init()
 }
 
 // write adds new entry to the cache and returns evicted entry if necessary.
-func (l *lruCache) write(en *entry) *entry {
+func (l *lruCache[Key, Value]) write(en *entry[Key, Value]) *entry[Key, Value] {
 	// Fast path
 	if en.accessList != nil {
 		// Entry existed, update its status instead.
@@ -44,14 +44,14 @@ func (l *lruCache) write(en *entry) *entry {
 	}
 	if l.cap > 0 && l.ls.Len() > l.cap {
 		// Remove the last element when capacity exceeded.
-		en = getEntry(l.ls.Back())
+		en = getEntry[Key, Value](l.ls.Back())
 		return l.remove(en)
 	}
 	return nil
 }
 
 // access updates cache entry for a get.
-func (l *lruCache) access(en *entry) {
+func (l *lruCache[Key, Value]) access(en *entry[Key, Value]) {
 	if en.accessList != nil {
 		l.markAccess(en)
 	}
@@ -59,12 +59,12 @@ func (l *lruCache) access(en *entry) {
 
 // markAccess marks the element has just been accessed.
 // en.accessList must not be null.
-func (l *lruCache) markAccess(en *entry) {
+func (l *lruCache[Key, Value]) markAccess(en *entry[Key, Value]) {
 	l.ls.MoveToFront(en.accessList)
 }
 
 // remove removes an entry from the cache.
-func (l *lruCache) remove(en *entry) *entry {
+func (l *lruCache[Key, Value]) remove(en *entry[Key, Value]) *entry[Key, Value] {
 	if en.accessList == nil {
 		// Already deleted
 		return nil
@@ -76,7 +76,7 @@ func (l *lruCache) remove(en *entry) *entry {
 }
 
 // iterate walks through all lists by access time.
-func (l *lruCache) iterate(fn func(en *entry) bool) {
+func (l *lruCache[Key, Value]) iterate(fn func(en *entry[Key, Value]) bool) {
 	iterateListFromBack(&l.ls, fn)
 }
 
@@ -92,8 +92,8 @@ const (
 
 // slruCache is a segmented LRU.
 // See http://highscalability.com/blog/2016/1/25/design-of-a-modern-cache.html
-type slruCache struct {
-	cache *cache
+type slruCache[Key comparable, Value any] struct {
+	cache *cache[Key, Value]
 
 	probationCap int
 	probationLs  list.List
@@ -103,7 +103,7 @@ type slruCache struct {
 }
 
 // init initializes the cache list.
-func (l *slruCache) init(c *cache, cap int) {
+func (l *slruCache[Key, Value]) init(c *cache[Key, Value], cap int) {
 	l.cache = c
 	l.protectedCap = int(float64(cap) * protectedRatio)
 	l.probationCap = cap - l.protectedCap
@@ -112,12 +112,12 @@ func (l *slruCache) init(c *cache, cap int) {
 }
 
 // length returns total number of entries in the cache.
-func (l *slruCache) length() int {
+func (l *slruCache[Key, Value]) length() int {
 	return l.probationLs.Len() + l.protectedLs.Len()
 }
 
 // write adds new entry to the cache and returns evicted entry if necessary.
-func (l *slruCache) write(en *entry) *entry {
+func (l *slruCache[Key, Value]) write(en *entry[Key, Value]) *entry[Key, Value] {
 	// Fast path
 	if en.accessList != nil {
 		// Entry existed, update its value instead.
@@ -147,14 +147,14 @@ func (l *slruCache) write(en *entry) *entry {
 	if l.probationCap > 0 && l.probationLs.Len() > l.probationCap &&
 		l.length() > (l.probationCap+l.protectedCap) {
 		// Remove the last element when capacity exceeded.
-		en = getEntry(l.probationLs.Back())
+		en = getEntry[Key, Value](l.probationLs.Back())
 		return l.remove(en)
 	}
 	return nil
 }
 
 // access updates cache entry for a get.
-func (l *slruCache) access(en *entry) {
+func (l *slruCache[Key, Value]) access(en *entry[Key, Value]) {
 	if en.accessList != nil {
 		l.markAccess(en)
 	}
@@ -162,7 +162,7 @@ func (l *slruCache) access(en *entry) {
 
 // markAccess marks the element has just been accessed.
 // en.accessList must not be null.
-func (l *slruCache) markAccess(en *entry) {
+func (l *slruCache[Key, Value]) markAccess(en *entry[Key, Value]) {
 	if en.listID == protectedSegment {
 		// Already in the protected segment.
 		l.protectedLs.MoveToFront(en.accessList)
@@ -176,7 +176,7 @@ func (l *slruCache) markAccess(en *entry) {
 	if l.protectedCap > 0 && l.protectedLs.Len() > l.protectedCap {
 		// Protected list capacity exceeded, move the last entry in the protected segment to
 		// the probation segment.
-		en = getEntry(l.protectedLs.Back())
+		en = getEntry[Key, Value](l.protectedLs.Back())
 		en.listID = probationSegment
 		l.protectedLs.Remove(en.accessList)
 		en.accessList = l.probationLs.PushFront(en)
@@ -185,7 +185,7 @@ func (l *slruCache) markAccess(en *entry) {
 
 // remove removes an entry from the cache and returns the removed entry or nil
 // if it is not found.
-func (l *slruCache) remove(en *entry) *entry {
+func (l *slruCache[Key, Value]) remove(en *entry[Key, Value]) *entry[Key, Value] {
 	if en.accessList == nil {
 		return nil
 	}
@@ -200,7 +200,7 @@ func (l *slruCache) remove(en *entry) *entry {
 }
 
 // victim returns the last entry in probation list if total entries reached the limit.
-func (l *slruCache) victim() *entry {
+func (l *slruCache[Key, Value]) victim() *entry[Key, Value] {
 	if l.probationCap <= 0 || l.length() < (l.probationCap+l.protectedCap) {
 		return nil
 	}
@@ -208,11 +208,11 @@ func (l *slruCache) victim() *entry {
 	if el == nil {
 		return nil
 	}
-	return getEntry(el)
+	return getEntry[Key, Value](el)
 }
 
 // iterate walks through all lists by access time.
-func (l *slruCache) iterate(fn func(en *entry) bool) {
+func (l *slruCache[Key, Value]) iterate(fn func(en *entry[Key, Value]) bool) {
 	iterateListFromBack(&l.protectedLs, fn)
 	iterateListFromBack(&l.probationLs, fn)
 }

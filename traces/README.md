@@ -1,5 +1,17 @@
 # Cache performance report
 
+Requires [gnuplot](http://www.gnuplot.info/)
+
+Download the traces
+
+```
+./dl-address.sh
+./dl-cache2k.sh
+./dl-storage.sh
+./dl-wikipedia.sh
+./dl-youtube.sh
+```
+
 Run all tests
 ```
 ./report.sh
@@ -17,7 +29,7 @@ open out.png
 
 Name         | Source
 ------------ | ------
-Address      | [University of California, San Diego](http://cseweb.ucsd.edu/classes/fa07/cse240a/project1.html)
+Address      | [University of California, San Diego](https://cseweb.ucsd.edu/classes/fa07/cse240a/project1.html)
 CPP          | Authors of the LIRS algorithm - retrieved from [Cache2k](https://github.com/cache2k/cache2k-benchmark)
 Glimpse      | Authors of the LIRS algorithm - retrieved from [Cache2k](https://github.com/cache2k/cache2k-benchmark)
 Multi2       | Authors of the LIRS algorithm - retrieved from [Cache2k](https://github.com/cache2k/cache2k-benchmark)

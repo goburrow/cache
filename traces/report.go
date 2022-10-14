@@ -12,8 +12,8 @@ type Reporter interface {
 	Report(cache.Stats, options)
 }
 
-type Provider interface {
-	Provide(ctx context.Context, keys chan<- interface{})
+type Provider[Key comparable] interface {
+	Provide(ctx context.Context, keys chan<- Key)
 }
 
 type reporter struct {
@@ -48,11 +48,11 @@ var policies = []string{
 	"tinylfu",
 }
 
-func benchmarkCache(p Provider, r Reporter, opt options) {
-	c := cache.New(cache.WithMaximumSize(opt.cacheSize), cache.WithPolicy(opt.policy))
+func benchmarkCache[Key comparable](p Provider[Key], r Reporter, opt options) {
+	c := cache.New(cache.WithMaximumSize[Key, Key](opt.cacheSize), cache.WithPolicy[Key, Key](opt.policy))
 	defer c.Close()
 
-	keys := make(chan interface{}, 100)
+	keys := make(chan Key, 100)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 

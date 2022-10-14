@@ -15,13 +15,13 @@ type storageProvider struct {
 // NewStorageProvider returns a Provider with items are from
 // Storage traces by the University of Massachusetts
 // (http://traces.cs.umass.edu/index.php/Storage/Storage).
-func NewStorageProvider(r io.Reader) Provider {
+func NewStorageProvider(r io.Reader) Provider[uint64] {
 	return &storageProvider{
 		r: bufio.NewReader(r),
 	}
 }
 
-func (p *storageProvider) Provide(ctx context.Context, keys chan<- interface{}) {
+func (p *storageProvider) Provide(ctx context.Context, keys chan<- uint64) {
 	defer close(keys)
 	for {
 		b, err := p.r.ReadBytes('\n')

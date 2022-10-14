@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func testRequest(t *testing.T, newProvider func(io.Reader) Provider, opt options, traceFiles string, reportFile string) {
+func testRequest[Key comparable](t *testing.T, newProvider func(io.Reader) Provider[Key], opt options, traceFiles string, reportFile string) {
 	r, err := openFilesGlob(traceFiles)
 	if err != nil {
 		t.Skip(err)
@@ -23,7 +23,7 @@ func testRequest(t *testing.T, newProvider func(io.Reader) Provider, opt options
 	benchmarkCache(provider, reporter, opt)
 }
 
-func testSize(t *testing.T, newProvider func(io.Reader) Provider, opt options, traceFiles, reportFile string) {
+func testSize[Key comparable](t *testing.T, newProvider func(io.Reader) Provider[Key], opt options, traceFiles, reportFile string) {
 	r, err := openFilesGlob(traceFiles)
 	if err != nil {
 		t.Skip(err)

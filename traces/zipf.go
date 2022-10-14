@@ -10,7 +10,7 @@ type zipfProvider struct {
 	n int
 }
 
-func NewZipfProvider(s float64, num int) Provider {
+func NewZipfProvider(s float64, num int) Provider[uint64] {
 	if s <= 1.0 || num <= 0 {
 		panic("invalid zipf parameters")
 	}
@@ -21,7 +21,7 @@ func NewZipfProvider(s float64, num int) Provider {
 	}
 }
 
-func (p *zipfProvider) Provide(ctx context.Context, keys chan<- interface{}) {
+func (p *zipfProvider) Provide(ctx context.Context, keys chan<- uint64) {
 	defer close(keys)
 	for i := 0; i < p.n; i++ {
 		v := p.r.Uint64()

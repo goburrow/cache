@@ -1,0 +1,9 @@
+*-cachesize.png
+*-requests.png
+*.bz2
+*.dat
+*.gz
+*.tgz
+/traces/*.trace
+request_*.txt
+size_*.txt

@@ -6,9 +6,9 @@ import (
 )
 
 type lruTest struct {
-	c    cache
-	lru  lruCache
-	slru slruCache
+	c    cache[int, string]
+	lru  lruCache[int, string]
+	slru slruCache[int, string]
 	t    *testing.T
 }
 
@@ -31,13 +31,13 @@ func (t *lruTest) assertSLRULen(protected, probation int) {
 	}
 }
 
-func (t *lruTest) assertEntry(en *entry, k int, v string, id uint8) {
+func (t *lruTest) assertEntry(en *entry[int, string], k int, v string, id uint8) {
 	if en == nil {
 		t.t.Helper()
 		t.t.Fatalf("unexpected entry: %v", en)
 	}
-	ak := en.key.(int)
-	av := en.getValue().(string)
+	ak := en.key
+	av := en.getValue()
 	if ak != k || av != v || en.listID != id {
 		t.t.Helper()
 		t.t.Fatalf("unexpected entry: %+v, want: {key: %d, value: %s, listID: %d}",
@@ -51,8 +51,8 @@ func (t *lruTest) assertLRUEntry(k int) {
 		t.t.Helper()
 		t.t.Fatalf("entry not found in cache: key=%v", k)
 	}
-	ak := en.key.(int)
-	av := en.getValue().(string)
+	ak := en.key
+	av := en.getValue()
 	v := fmt.Sprintf("%d", k)
 	if ak != k || av != v || en.listID != 0 {
 		t.t.Helper()
@@ -66,8 +66,8 @@ func (t *lruTest) assertSLRUEntry(k int, id uint8) {
 		t.t.Helper()
 		t.t.Fatalf("entry not found in cache: key=%v", k)
 	}
-	ak := en.key.(int)
-	av := en.getValue().(string)
+	ak := en.key
+	av := en.getValue()
 	v := fmt.Sprintf("%d", k)
 	if ak != k || av != v || en.listID != id {
 		t.t.Helper()
@@ -132,8 +132,8 @@ func TestLRUWalk(t *testing.T) {
 	}
 	// 5 4 3 2 1
 	found := ""
-	s.lru.iterate(func(en *entry) bool {
-		found += en.getValue().(string) + " "
+	s.lru.iterate(func(en *entry[int, string]) bool {
+		found += en.getValue() + " "
 		return true
 	})
 	if found != "1 2 3 4 5 " {
@@ -144,12 +144,12 @@ func TestLRUWalk(t *testing.T) {
 	s.lru.access(entries[3])
 	// 3 5 1 4 2
 	found = ""
-	s.lru.iterate(func(en *entry) bool {
-		found += en.getValue().(string) + " "
-		if en.key.(int)%2 == 0 {
+	s.lru.iterate(func(en *entry[int, string]) bool {
+		found += en.getValue() + " "
+		if en.key%2 == 0 {
 			s.lru.remove(en)
 		}
-		return en.key.(int) != 5
+		return en.key != 5
 	})
 	if found != "2 4 1 5 " {
 		t.Fatalf("unexpected entries: %v", found)
@@ -238,8 +238,8 @@ func TestSLRUWalk(t *testing.T) {
 	}
 	// | 9 8 7 6 5 4
 	found := ""
-	s.slru.iterate(func(en *entry) bool {
-		found += en.getValue().(string) + " "
+	s.slru.iterate(func(en *entry[int, string]) bool {
+		found += en.getValue() + " "
 		return true
 	})
 	if found != "4 5 6 7 8 9 " {
@@ -250,12 +250,12 @@ func TestSLRUWalk(t *testing.T) {
 	s.slru.access(entries[8])
 	// 8 5 7 | 9 6 4
 	found = ""
-	s.slru.iterate(func(en *entry) bool {
-		found += en.getValue().(string) + " "
-		if en.key.(int)%2 == 0 {
+	s.slru.iterate(func(en *entry[int, string]) bool {
+		found += en.getValue() + " "
+		if en.key%2 == 0 {
 			s.slru.remove(en)
 		}
-		return en.key.(int) != 6
+		return en.key != 6
 	})
 	if found != "7 5 8 4 6 " {
 		t.Fatalf("unexpected entries: %v", found)
@@ -266,8 +266,8 @@ func TestSLRUWalk(t *testing.T) {
 	s.assertSLRUEntry(9, probationSegment)
 }
 
-func createLRUEntries(n int) []*entry {
-	en := make([]*entry, n)
+func createLRUEntries(n int) []*entry[int, string] {
+	en := make([]*entry[int, string], n)
 	for i := range en {
 		en[i] = newEntry(i, fmt.Sprintf("%d", i), 0 /* unused */)
 	}
