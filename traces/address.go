@@ -15,13 +15,13 @@ type addressProvider struct {
 // NewAddressProvider returns a Provider with items are from
 // application traces by the University of California, San Diego
 // (http://cseweb.ucsd.edu/classes/fa07/cse240a/project1.html).
-func NewAddressProvider(r io.Reader) Provider {
+func NewAddressProvider(r io.Reader) Provider[uint64] {
 	return &addressProvider{
 		r: bufio.NewReader(r),
 	}
 }
 
-func (p *addressProvider) Provide(ctx context.Context, keys chan<- interface{}) {
+func (p *addressProvider) Provide(ctx context.Context, keys chan<- uint64) {
 	defer close(keys)
 	for {
 		b, err := p.r.ReadBytes('\n')

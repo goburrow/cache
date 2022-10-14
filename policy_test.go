@@ -6,9 +6,9 @@ import (
 )
 
 func BenchmarkCacheSegment(b *testing.B) {
-	c := cache{}
+	c := cache[int, int]{}
 	const count = 1 << 10
-	entries := make([]*entry, count)
+	entries := make([]*entry[int, int], count)
 	for i := range entries {
 		entries[i] = newEntry(i, i, uint64(i))
 	}

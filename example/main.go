@@ -9,19 +9,19 @@ import (
 )
 
 func main() {
-	load := func(k cache.Key) (cache.Value, error) {
+	load := func(k int) (string, error) {
 		fmt.Printf("loading %v\n", k)
 		time.Sleep(500 * time.Millisecond)
 		return fmt.Sprintf("%d-%d", k, time.Now().Unix()), nil
 	}
-	remove := func(k cache.Key, v cache.Value) {
+	remove := func(k int, v string) {
 		fmt.Printf("removed %v (%v)\n", k, v)
 	}
 	// Create a new cache
 	c := cache.NewLoadingCache(load,
-		cache.WithMaximumSize(1000),
-		cache.WithExpireAfterAccess(30*time.Second),
-		cache.WithRefreshAfterWrite(20*time.Second),
+		cache.WithMaximumSize[int, string](1000),
+		cache.WithExpireAfterAccess[int, string](30*time.Second),
+		cache.WithRefreshAfterWrite[int, string](20*time.Second),
 		cache.WithRemovalListener(remove),
 	)
 

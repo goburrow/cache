@@ -58,7 +58,7 @@ func BenchmarkHotspot(b *testing.B) {
 }
 
 func benchmarkCache(b *testing.B, g synthetic.Generator) {
-	c := New(WithMaximumSize(testMaxSize))
+	c := New(WithMaximumSize[int, int](testMaxSize))
 	defer c.Close()
 
 	intCh := make(chan int, 100)
@@ -86,7 +86,7 @@ func benchmarkCache(b *testing.B, g synthetic.Generator) {
 	})
 }
 
-func printStats(b *testing.B, c Cache, start time.Time) {
+func printStats(b *testing.B, c Cache[int, int], start time.Time) {
 	dur := time.Since(start)
 
 	var st Stats

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 if [ -z "$FORMAT" ]; then
 	#FORMAT='svg size 400,300 font "Helvetica,10"'
 	FORMAT='png size 220,180 small noenhanced'

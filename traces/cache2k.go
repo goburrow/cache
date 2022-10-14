@@ -13,13 +13,13 @@ type cache2kProvider struct {
 
 // NewCache2kProvider returns a Provider which items are from traces
 // in Cache2k repository (https://github.com/cache2k/cache2k-benchmark).
-func NewCache2kProvider(r io.Reader) Provider {
+func NewCache2kProvider(r io.Reader) Provider[uint32] {
 	return &cache2kProvider{
 		r: bufio.NewReader(r),
 	}
 }
 
-func (p *cache2kProvider) Provide(ctx context.Context, keys chan<- interface{}) {
+func (p *cache2kProvider) Provide(ctx context.Context, keys chan<- uint32) {
 	defer close(keys)
 
 	v := make([]byte, 4)

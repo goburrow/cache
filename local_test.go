@@ -18,7 +18,7 @@ func TestCache(t *testing.T) {
 	}
 
 	wg := sync.WaitGroup{}
-	c := New(withInsertionListener(func(Key, Value) {
+	c := New[string, int](withInsertionListener(func(string, int) {
 		wg.Done()
 	}))
 	defer c.Close()
@@ -31,7 +31,7 @@ func TestCache(t *testing.T) {
 
 	for _, d := range data {
 		v, ok := c.GetIfPresent(d.k)
-		if !ok || v.(int) != d.v {
+		if !ok || v != d.v {
 			t.Fatalf("unexpected value: %v (%v)", v, ok)
 		}
 	}
@@ -40,10 +40,10 @@ func TestCache(t *testing.T) {
 func TestMaximumSize(t *testing.T) {
 	max := 10
 	wg := sync.WaitGroup{}
-	insFunc := func(k Key, v Value) {
+	insFunc := func(k int, v int) {
 		wg.Done()
 	}
-	c := New(WithMaximumSize(max), withInsertionListener(insFunc)).(*localCache)
+	c := New[int, int](WithMaximumSize[int, int](max), withInsertionListener(insFunc)).(*localCache[int, int])
 	defer c.Close()
 
 	wg.Add(max)
@@ -68,17 +68,17 @@ func TestMaximumSize(t *testing.T) {
 }
 
 func TestRemovalListener(t *testing.T) {
-	removed := make(map[Key]int)
+	removed := make(map[int]int)
 	wg := sync.WaitGroup{}
-	remFunc := func(k Key, v Value) {
-		removed[k] = v.(int)
+	remFunc := func(k int, v int) {
+		removed[k] = v
 		wg.Done()
 	}
-	insFunc := func(k Key, v Value) {
+	insFunc := func(k int, v int) {
 		wg.Done()
 	}
 	max := 3
-	c := New(WithMaximumSize(max), WithRemovalListener(remFunc),
+	c := New(WithMaximumSize[int, int](max), WithRemovalListener(remFunc),
 		withInsertionListener(insFunc))
 	defer c.Close()
 
@@ -109,11 +109,11 @@ func TestRemovalListener(t *testing.T) {
 func TestClose(t *testing.T) {
 	removed := 0
 	wg := sync.WaitGroup{}
-	remFunc := func(Key, Value) {
+	remFunc := func(int, int) {
 		removed++
 		wg.Done()
 	}
-	insFunc := func(Key, Value) {
+	insFunc := func(int, int) {
 		wg.Done()
 	}
 	c := New(WithRemovalListener(remFunc), withInsertionListener(insFunc))
@@ -133,15 +133,15 @@ func TestClose(t *testing.T) {
 
 func TestLoadingCache(t *testing.T) {
 	loadCount := 0
-	loader := func(k Key) (Value, error) {
+	loader := func(k int) (int, error) {
 		loadCount++
-		if k.(int)%2 != 0 {
-			return nil, errors.New("odd")
+		if k%2 != 0 {
+			return 0, errors.New("odd")
 		}
 		return k, nil
 	}
 	wg := sync.WaitGroup{}
-	insFunc := func(Key, Value) {
+	insFunc := func(int, int) {
 		wg.Done()
 	}
 	c := NewLoadingCache(loader, withInsertionListener(insFunc))
@@ -151,7 +151,7 @@ func TestLoadingCache(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v.(int) != 2 {
+	if v != 2 {
 		t.Fatalf("unexpected get: %v", v)
 	}
 	if loadCount != 1 {
@@ -162,13 +162,13 @@ func TestLoadingCache(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v.(int) != 2 {
+	if v != 2 {
 		t.Fatalf("unexpected get: %v", v)
 	}
 	if loadCount != 1 {
 		t.Fatalf("unexpected load count: %v", loadCount)
 	}
-	v, err = c.Get(1)
+	_, err = c.Get(1)
 	if err == nil || err.Error() != "odd" {
 		t.Fatalf("expected error: %v", err)
 	}
@@ -176,13 +176,13 @@ func TestLoadingCache(t *testing.T) {
 	wg.Wait()
 }
 
-func simpleLoader(k Key) (Value, error) {
+func simpleLoader(k string) (string, error) {
 	return k, nil
 }
 
 func TestCacheStats(t *testing.T) {
 	wg := sync.WaitGroup{}
-	insFunc := func(Key, Value) {
+	insFunc := func(string, string) {
 		wg.Done()
 	}
 	c := NewLoadingCache(simpleLoader, withInsertionListener(insFunc))
@@ -211,13 +211,13 @@ func TestCacheStats(t *testing.T) {
 
 func TestExpireAfterAccess(t *testing.T) {
 	wg := sync.WaitGroup{}
-	fn := func(k Key, v Value) {
+	fn := func(k int, v int) {
 		wg.Done()
 	}
 	mockTime := newMockTime()
 	currentTime = mockTime.now
-	c := New(WithExpireAfterAccess(1*time.Second), WithRemovalListener(fn),
-		withInsertionListener(fn)).(*localCache)
+	c := New(WithExpireAfterAccess[int, int](1*time.Second), WithRemovalListener(fn),
+		withInsertionListener(fn)).(*localCache[int, int])
 	defer c.Close()
 
 	wg.Add(1)
@@ -252,17 +252,17 @@ func TestExpireAfterAccess(t *testing.T) {
 
 func TestExpireAfterWrite(t *testing.T) {
 	loadCount := 0
-	loader := func(k Key) (Value, error) {
+	loader := func(k string) (int, error) {
 		loadCount++
 		return loadCount, nil
 	}
 	wg := sync.WaitGroup{}
-	insFunc := func(Key, Value) {
+	insFunc := func(string, int) {
 		wg.Done()
 	}
 	mockTime := newMockTime()
 	currentTime = mockTime.now
-	c := NewLoadingCache(loader, WithExpireAfterWrite(1*time.Second),
+	c := NewLoadingCache(loader, WithExpireAfterWrite[string, int](1*time.Second),
 		withInsertionListener(insFunc))
 	defer c.Close()
 	// New value
@@ -272,7 +272,7 @@ func TestExpireAfterWrite(t *testing.T) {
 		t.Fatal(err)
 	}
 	wg.Wait()
-	if v.(int) != 1 || loadCount != 1 {
+	if v != 1 || loadCount != 1 {
 		t.Fatalf("unexpected load count: %v value=%v, want: %v value=%v", loadCount, v, 1, 1)
 	}
 	// Within 1s, the value should not yet expired.
@@ -281,7 +281,7 @@ func TestExpireAfterWrite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v.(int) != 1 || loadCount != 1 {
+	if v != 1 || loadCount != 1 {
 		t.Fatalf("unexpected load count: %v value=%v, want: %v value=%v", loadCount, v, 1, 1)
 	}
 	// After 1s, the value should be expired and refresh triggered.
@@ -292,7 +292,7 @@ func TestExpireAfterWrite(t *testing.T) {
 		t.Fatal(err)
 	}
 	wg.Wait()
-	if v.(int) != 1 || loadCount != 2 {
+	if v != 1 || loadCount != 2 {
 		t.Fatalf("unexpected load count: %v value=%v, want: %v value=%v", loadCount, v, 2, 1)
 	}
 	// New value is loaded.
@@ -300,7 +300,7 @@ func TestExpireAfterWrite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v.(int) != 2 || loadCount != 2 {
+	if v != 2 || loadCount != 2 {
 		t.Fatalf("unexpected load count: %v value=%v, want: %v value=%v", loadCount, v, 2, 2)
 	}
 }
@@ -308,33 +308,33 @@ func TestExpireAfterWrite(t *testing.T) {
 func TestRefreshAterWrite(t *testing.T) {
 	var mutex sync.Mutex
 	loaded := make(map[int]int)
-	loader := func(k Key) (Value, error) {
+	loader := func(k int) (int, error) {
 		mutex.Lock()
-		n := loaded[k.(int)]
+		n := loaded[k]
 		n++
-		loaded[k.(int)] = n
+		loaded[k] = n
 		mutex.Unlock()
 		return n, nil
 	}
 	wg := sync.WaitGroup{}
-	insFunc := func(Key, Value) {
+	insFunc := func(int, int) {
 		wg.Done()
 	}
 	mockTime := newMockTime()
 	currentTime = mockTime.now
-	c := NewLoadingCache(loader, WithExpireAfterAccess(4*time.Second), WithRefreshAfterWrite(2*time.Second),
-		WithReloader(&syncReloader{loader}), withInsertionListener(insFunc))
+	c := NewLoadingCache(loader, WithExpireAfterAccess[int, int](4*time.Second), WithRefreshAfterWrite[int, int](2*time.Second),
+		WithReloader[int, int](&syncReloader[int, int]{loader}), withInsertionListener(insFunc))
 	defer c.Close()
 
 	wg.Add(3)
 	v, err := c.Get(1)
-	if err != nil || v.(int) != 1 {
+	if err != nil || v != 1 {
 		t.Fatalf("unexpected get: %v %v", v, err)
 	}
 	// 3s
 	mockTime.add(3 * time.Second)
 	v, err = c.Get(2)
-	if err != nil || v.(int) != 1 {
+	if err != nil || v != 1 {
 		t.Fatalf("unexpected get: %v %v", v, err)
 	}
 	wg.Wait()
@@ -342,24 +342,24 @@ func TestRefreshAterWrite(t *testing.T) {
 		t.Fatalf("unexpected loaded: %v", loaded)
 	}
 	v, err = c.Get(1)
-	if err != nil || v.(int) != 2 {
+	if err != nil || v != 2 {
 		t.Fatalf("unexpected get: %v %v", v, err)
 	}
 	// 8s
 	mockTime.add(5 * time.Second)
 	wg.Add(1)
 	v, err = c.Get(1)
-	if err != nil || v.(int) != 3 {
+	if err != nil || v != 3 {
 		t.Fatalf("unexpected get: %v %v", v, err)
 	}
 }
 
 func TestGetIfPresentExpired(t *testing.T) {
 	wg := sync.WaitGroup{}
-	insFunc := func(Key, Value) {
+	insFunc := func(int, string) {
 		wg.Done()
 	}
-	c := New(WithExpireAfterWrite(1*time.Second), withInsertionListener(insFunc))
+	c := New(WithExpireAfterWrite[int, string](1*time.Second), withInsertionListener(insFunc))
 	mockTime := newMockTime()
 	currentTime = mockTime.now
 
@@ -370,7 +370,7 @@ func TestGetIfPresentExpired(t *testing.T) {
 	wg.Add(1)
 	c.Put(0, "0")
 	v, ok = c.GetIfPresent(0)
-	if !ok || v.(string) != "0" {
+	if !ok || v != "0" {
 		t.Fatalf("expect present, actual: %v %v", v, ok)
 	}
 	wg.Wait()
@@ -382,17 +382,17 @@ func TestGetIfPresentExpired(t *testing.T) {
 }
 
 func TestLoadingAsyncReload(t *testing.T) {
-	var val Value
-	loader := func(k Key) (Value, error) {
-		if val == nil {
-			return nil, errors.New("nil")
+	var val string
+	loader := func(k int) (string, error) {
+		if val == "" {
+			return "", errors.New("empty")
 		}
 		return val, nil
 	}
 	mockTime := newMockTime()
 	currentTime = mockTime.now
-	c := NewLoadingCache(loader, WithExpireAfterWrite(5*time.Millisecond),
-		WithReloader(&syncReloader{loader}))
+	c := NewLoadingCache(loader, WithExpireAfterWrite[int, string](5*time.Millisecond),
+		WithReloader[int, string](&syncReloader[int, string]{loader}))
 	val = "a"
 	v, err := c.Get(1)
 	if err != nil || v != val {
@@ -404,22 +404,22 @@ func TestLoadingAsyncReload(t *testing.T) {
 	if err != nil || v != val {
 		t.Fatalf("unexpected get %v %v", v, err)
 	}
-	val = nil
+	val = ""
 	v, err = c.Get(2)
-	if v != nil || err == nil || err.Error() != "nil" {
+	if v != "" || err == nil || err.Error() != "empty" {
 		t.Fatalf("expect error: actual %v %v", v, err)
 	}
 }
 
 func TestLoadingRefresh(t *testing.T) {
 	count := 0
-	c := NewLoadingCache(func(key Key) (Value, error) {
+	c := NewLoadingCache(func(key int) (int, error) {
 		count++
 		return count, nil
 	})
 	for i := 10; i > 0; i-- {
 		v, _ := c.Get(1)
-		if v.(int) != 1 {
+		if v != 1 {
 			t.Fatalf("expect value loaded, actual: %v", v)
 		}
 		v, ok := c.GetIfPresent(1)
@@ -429,18 +429,18 @@ func TestLoadingRefresh(t *testing.T) {
 	}
 	c.Refresh(2)
 	v, _ := c.Get(2)
-	if v.(int) != 2 {
+	if v != 2 {
 		t.Fatalf("expect new value loaded, actual: %v", v)
 	}
 	c.Put(2, 3)
 	v, _ = c.Get(2)
-	if v.(int) != 3 {
+	if v != 3 {
 		t.Fatalf("expect new value, actual: %v", v)
 	}
 }
 
 func TestCloseMultiple(t *testing.T) {
-	c := New()
+	c := New[int, int]()
 	start := make(chan bool)
 	const n = 10
 	var wg sync.WaitGroup
@@ -463,7 +463,7 @@ func TestCloseMultiple(t *testing.T) {
 }
 
 func BenchmarkGetSame(b *testing.B) {
-	c := New()
+	c := New[string, string]()
 	c.Put("*", "*")
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -474,9 +474,9 @@ func BenchmarkGetSame(b *testing.B) {
 	})
 }
 
-func cacheSize(c *cache) int {
+func cacheSize[Key comparable, Value any](c *cache[Key, Value]) int {
 	length := 0
-	c.walk(func(*entry) {
+	c.walk(func(*entry[Key, Value]) {
 		length++
 	})
 	return length
@@ -506,15 +506,15 @@ func (t *mockTime) now() time.Time {
 	return t.value
 }
 
-type syncReloader struct {
-	loaderFn LoaderFunc
+type syncReloader[Key comparable, Value any] struct {
+	loaderFn LoaderFunc[Key, Value]
 }
 
-func (s *syncReloader) Reload(k Key, v Value, setFn func(Value, error)) {
+func (s *syncReloader[Key, Value]) Reload(k Key, v Value, setFn func(Value, error)) {
 	v, err := s.loaderFn(k)
 	setFn(v, err)
 }
 
-func (s *syncReloader) Close() error {
+func (s *syncReloader[Key, Value]) Close() error {
 	return nil
 }

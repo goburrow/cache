@@ -14,7 +14,7 @@ const (
 )
 
 // entry stores cached entry key and value.
-type entry struct {
+type entry[Key comparable, Value any] struct {
 	// Structs with first field align to 64 bits will also be aligned to 64.
 	// https://golang.org/pkg/sync/atomic/#pkg-note-BUG
 
@@ -42,8 +42,8 @@ type entry struct {
 	listID uint8
 }
 
-func newEntry(k Key, v Value, h uint64) *entry {
-	en := &entry{
+func newEntry[Key comparable, Value any](k Key, v Value, h uint64) *entry[Key, Value] {
+	en := &entry[Key, Value]{
 		key:  k,
 		hash: h,
 	}
@@ -51,46 +51,46 @@ func newEntry(k Key, v Value, h uint64) *entry {
 	return en
 }
 
-func (e *entry) getValue() Value {
+func (e *entry[Key, Value]) getValue() Value {
 	return e.value.Load().(Value)
 }
 
-func (e *entry) setValue(v Value) {
+func (e *entry[Key, Value]) setValue(v Value) {
 	e.value.Store(v)
 }
 
-func (e *entry) getAccessTime() int64 {
+func (e *entry[Key, Value]) getAccessTime() int64 {
 	return atomic.LoadInt64(&e.accessTime)
 }
 
-func (e *entry) setAccessTime(v int64) {
+func (e *entry[Key, Value]) setAccessTime(v int64) {
 	atomic.StoreInt64(&e.accessTime, v)
 }
 
-func (e *entry) getWriteTime() int64 {
+func (e *entry[Key, Value]) getWriteTime() int64 {
 	return atomic.LoadInt64(&e.writeTime)
 }
 
-func (e *entry) setWriteTime(v int64) {
+func (e *entry[Key, Value]) setWriteTime(v int64) {
 	atomic.StoreInt64(&e.writeTime, v)
 }
 
-func (e *entry) getLoading() bool {
+func (e *entry[Key, Value]) getLoading() bool {
 	return atomic.LoadInt32(&e.loading) != 0
 }
 
-func (e *entry) setLoading(v bool) bool {
+func (e *entry[Key, Value]) setLoading(v bool) bool {
 	if v {
 		return atomic.CompareAndSwapInt32(&e.loading, 0, 1)
 	}
 	return atomic.CompareAndSwapInt32(&e.loading, 1, 0)
 }
 
-func (e *entry) getInvalidated() bool {
+func (e *entry[Key, Value]) getInvalidated() bool {
 	return atomic.LoadInt32(&e.invalidated) != 0
 }
 
-func (e *entry) setInvalidated(v bool) {
+func (e *entry[Key, Value]) setInvalidated(v bool) {
 	if v {
 		atomic.StoreInt32(&e.invalidated, 1)
 	} else {
@@ -99,8 +99,8 @@ func (e *entry) setInvalidated(v bool) {
 }
 
 // getEntry returns the entry attached to the given list element.
-func getEntry(el *list.Element) *entry {
-	return el.Value.(*entry)
+func getEntry[Key comparable, Value any](el *list.Element) *entry[Key, Value] {
+	return el.Value.(*entry[Key, Value])
 }
 
 // event is the cache event (add, hit or delete).
@@ -113,98 +113,98 @@ const (
 	eventClose
 )
 
-type entryEvent struct {
-	entry *entry
+type entryEvent[Key comparable, Value any] struct {
+	entry *entry[Key, Value]
 	event event
 }
 
 // cache is a data structure for cache entries.
-type cache struct {
+type cache[Key comparable, Value any] struct {
 	size int64                  // Access atomically - must be aligned on 32-bit
 	segs [segmentCount]sync.Map // map[Key]*entry
 }
 
-func (c *cache) get(k Key, h uint64) *entry {
+func (c *cache[Key, Value]) get(k Key, h uint64) *entry[Key, Value] {
 	seg := c.segment(h)
 	v, ok := seg.Load(k)
 	if ok {
-		return v.(*entry)
+		return v.(*entry[Key, Value])
 	}
 	return nil
 }
 
-func (c *cache) getOrSet(v *entry) *entry {
+func (c *cache[Key, Value]) getOrSet(v *entry[Key, Value]) *entry[Key, Value] {
 	seg := c.segment(v.hash)
 	en, ok := seg.LoadOrStore(v.key, v)
 	if ok {
-		return en.(*entry)
+		return en.(*entry[Key, Value])
 	}
 	atomic.AddInt64(&c.size, 1)
 	return nil
 }
 
-func (c *cache) delete(v *entry) {
+func (c *cache[Key, Value]) delete(v *entry[Key, Value]) {
 	seg := c.segment(v.hash)
 	seg.Delete(v.key)
 	atomic.AddInt64(&c.size, -1)
 }
 
-func (c *cache) len() int {
+func (c *cache[Key, Value]) len() int {
 	return int(atomic.LoadInt64(&c.size))
 }
 
-func (c *cache) walk(fn func(*entry)) {
+func (c *cache[Key, Value]) walk(fn func(*entry[Key, Value])) {
 	for i := range c.segs {
-		c.segs[i].Range(func(k, v interface{}) bool {
-			fn(v.(*entry))
+		c.segs[i].Range(func(k, v any) bool {
+			fn(v.(*entry[Key, Value]))
 			return true
 		})
 	}
 }
 
-func (c *cache) segment(h uint64) *sync.Map {
+func (c *cache[Key, Value]) segment(h uint64) *sync.Map {
 	return &c.segs[h&segmentMask]
 }
 
 // policy is a cache policy.
-type policy interface {
+type policy[Key comparable, Value any] interface {
 	// init initializes the policy.
-	init(cache *cache, maximumSize int)
+	init(cache *cache[Key, Value], maximumSize int)
 	// write handles Write event for the entry.
 	// It adds new entry and returns evicted entry if needed.
-	write(entry *entry) *entry
+	write(entry *entry[Key, Value]) *entry[Key, Value]
 	// access handles Access event for the entry.
 	// It marks then entry recently accessed.
-	access(entry *entry)
+	access(entry *entry[Key, Value])
 	// remove removes the entry.
-	remove(entry *entry) *entry
+	remove(entry *entry[Key, Value]) *entry[Key, Value]
 	// iterate iterates all entries by their access time.
-	iterate(func(entry *entry) bool)
+	iterate(func(entry *entry[Key, Value]) bool)
 }
 
-func newPolicy(name string) policy {
+func newPolicy[Key comparable, Value any](name string) policy[Key, Value] {
 	switch name {
 	case "", "slru":
-		return &slruCache{}
+		return &slruCache[Key, Value]{}
 	case "lru":
-		return &lruCache{}
+		return &lruCache[Key, Value]{}
 	case "tinylfu":
-		return &tinyLFU{}
+		return &tinyLFU[Key, Value]{}
 	default:
 		panic("cache: unsupported policy " + name)
 	}
 }
 
 // recencyQueue manages cache entries by write time.
-type recencyQueue struct {
+type recencyQueue[Key comparable, Value any] struct {
 	ls list.List
 }
 
-func (w *recencyQueue) init(cache *cache, maximumSize int) {
+func (w *recencyQueue[Key, Value]) init(cache *cache[Key, Value], maximumSize int) {
 	w.ls.Init()
 }
 
-func (w *recencyQueue) write(en *entry) *entry {
+func (w *recencyQueue[Key, Value]) write(en *entry[Key, Value]) *entry[Key, Value] {
 	if en.writeList == nil {
 		en.writeList = w.ls.PushFront(en)
 	} else {
@@ -213,10 +213,10 @@ func (w *recencyQueue) write(en *entry) *entry {
 	return nil
 }
 
-func (w *recencyQueue) access(en *entry) {
+func (w *recencyQueue[Key, Value]) access(en *entry[Key, Value]) {
 }
 
-func (w *recencyQueue) remove(en *entry) *entry {
+func (w *recencyQueue[Key, Value]) remove(en *entry[Key, Value]) *entry[Key, Value] {
 	if en.writeList == nil {
 		return en
 	}
@@ -225,32 +225,32 @@ func (w *recencyQueue) remove(en *entry) *entry {
 	return en
 }
 
-func (w *recencyQueue) iterate(fn func(en *entry) bool) {
+func (w *recencyQueue[Key, Value]) iterate(fn func(en *entry[Key, Value]) bool) {
 	iterateListFromBack(&w.ls, fn)
 }
 
-type discardingQueue struct{}
+type discardingQueue[Key comparable, Value any] struct{}
 
-func (discardingQueue) init(cache *cache, maximumSize int) {
+func (discardingQueue[Key, Value]) init(cache *cache[Key, Value], maximumSize int) {
 }
 
-func (discardingQueue) write(en *entry) *entry {
+func (discardingQueue[Key, Value]) write(en *entry[Key, Value]) *entry[Key, Value] {
 	return nil
 }
 
-func (discardingQueue) access(en *entry) {
+func (discardingQueue[Key, Value]) access(en *entry[Key, Value]) {
 }
 
-func (discardingQueue) remove(en *entry) *entry {
+func (discardingQueue[Key, Value]) remove(en *entry[Key, Value]) *entry[Key, Value] {
 	return en
 }
 
-func (discardingQueue) iterate(fn func(en *entry) bool) {
+func (discardingQueue[Key, Value]) iterate(fn func(en *entry[Key, Value]) bool) {
 }
 
-func iterateListFromBack(ls *list.List, fn func(en *entry) bool) {
+func iterateListFromBack[Key comparable, Value any](ls *list.List, fn func(en *entry[Key, Value]) bool) {
 	for el := ls.Back(); el != nil; {
-		en := getEntry(el)
+		en := getEntry[Key, Value](el)
 		prev := el.Prev() // Get Prev as fn can delete the entry.
 		if !fn(en) {
 			return

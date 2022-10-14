@@ -11,13 +11,13 @@ type wikipediaProvider struct {
 	r *bufio.Reader
 }
 
-func NewWikipediaProvider(r io.Reader) Provider {
+func NewWikipediaProvider(r io.Reader) Provider[string] {
 	return &wikipediaProvider{
 		r: bufio.NewReader(r),
 	}
 }
 
-func (p *wikipediaProvider) Provide(ctx context.Context, keys chan<- interface{}) {
+func (p *wikipediaProvider) Provide(ctx context.Context, keys chan<- string) {
 	defer close(keys)
 	for {
 		b, err := p.r.ReadBytes('\n')

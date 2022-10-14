@@ -6,8 +6,8 @@ import (
 )
 
 type tinyLFUTest struct {
-	c   cache
-	lfu tinyLFU
+	c   cache[int, string]
+	lfu tinyLFU[int, string]
 	t   *testing.T
 }
 
@@ -31,9 +31,9 @@ func (t *tinyLFUTest) assertLen(admission, protected, probation int) {
 	}
 }
 
-func (t *tinyLFUTest) assertEntry(en *entry, k int, v string, id uint8) {
-	ak := en.key.(int)
-	av := en.getValue().(string)
+func (t *tinyLFUTest) assertEntry(en *entry[int, string], k int, v string, id uint8) {
+	ak := en.key
+	av := en.getValue()
 	if ak != k || av != v || en.listID != id {
 		t.t.Helper()
 		t.t.Fatalf("unexpected entry: %+v, want: {key: %d, value: %s, listID: %d}",
@@ -47,8 +47,8 @@ func (t *tinyLFUTest) assertLRUEntry(k int, id uint8) {
 		t.t.Helper()
 		t.t.Fatalf("entry not found in cache: key=%v", k)
 	}
-	ak := en.key.(int)
-	av := en.getValue().(string)
+	ak := en.key
+	av := en.getValue()
 	v := fmt.Sprintf("%d", k)
 	if ak != k || av != v || en.listID != id {
 		t.t.Helper()
@@ -64,7 +64,7 @@ func TestTinyLFU(t *testing.T) {
 	s.lfu.slru.protectedCap = 2
 	s.lfu.slru.probationCap = 1
 
-	en := make([]*entry, 10)
+	en := make([]*entry[int, string], 10)
 	for i := range en {
 		en[i] = newEntry(i, fmt.Sprintf("%d", i), sum(i))
 	}

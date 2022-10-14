@@ -11,13 +11,13 @@ type youtubeProvider struct {
 	r *bufio.Reader
 }
 
-func NewYoutubeProvider(r io.Reader) Provider {
+func NewYoutubeProvider(r io.Reader) Provider[string] {
 	return &youtubeProvider{
 		r: bufio.NewReader(r),
 	}
 }
 
-func (p *youtubeProvider) Provide(ctx context.Context, keys chan<- interface{}) {
+func (p *youtubeProvider) Provide(ctx context.Context, keys chan<- string) {
 	defer close(keys)
 	for {
 		b, err := p.r.ReadBytes('\n')

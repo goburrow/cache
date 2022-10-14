@@ -34,15 +34,15 @@ import (
 )
 
 func main() {
-	load := func(k cache.Key) (cache.Value, error) {
+	load := func(k int) (string, error) {
 		time.Sleep(100 * time.Millisecond) // Slow task
 		return fmt.Sprintf("%d", k), nil
 	}
 	// Create a loading cache
 	c := cache.NewLoadingCache(load,
-		cache.WithMaximumSize(100),                 // Limit number of entries in the cache.
-		cache.WithExpireAfterAccess(1*time.Minute), // Expire entries after 1 minute since last accessed.
-		cache.WithRefreshAfterWrite(2*time.Minute), // Expire entries after 2 minutes since last created.
+		cache.WithMaximumSize[int, string](100),                 // Limit number of entries in the cache.
+		cache.WithExpireAfterAccess[int, string](1*time.Minute), // Expire entries after 1 minute since last accessed.
+		cache.WithRefreshAfterWrite[int, string](2*time.Minute), // Expire entries after 2 minutes since last created.
 	)
 
 	getTicker := time.Tick(100 * time.Millisecond)

@@ -11,18 +11,18 @@ const (
 // tinyLFU is an implementation of TinyLFU. It utilizing 4bit Count Min Sketch
 // and Bloom Filter as a Doorkeeper and Segmented LRU for long term retention.
 // See https://arxiv.org/pdf/1512.00727v2.pdf
-type tinyLFU struct {
+type tinyLFU[Key comparable, Value any] struct {
 	filter  bloomFilter    // 1bit counter
 	counter countMinSketch // 4bit counter
 
 	additions int
 	samples   int
 
-	lru  lruCache
-	slru slruCache
+	lru  lruCache[Key, Value]
+	slru slruCache[Key, Value]
 }
 
-func (l *tinyLFU) init(c *cache, cap int) {
+func (l *tinyLFU[Key, Value]) init(c *cache[Key, Value], cap int) {
 	if cap > 0 {
 		// Only enable doorkeeper when capacity is finite.
 		l.samples = samplesMultiplier * cap
@@ -34,7 +34,7 @@ func (l *tinyLFU) init(c *cache, cap int) {
 	l.slru.init(c, cap-lruCap)
 }
 
-func (l *tinyLFU) write(en *entry) *entry {
+func (l *tinyLFU[Key, Value]) write(en *entry[Key, Value]) *entry[Key, Value] {
 	if l.lru.cap <= 0 {
 		return l.slru.write(en)
 	}
@@ -56,7 +56,7 @@ func (l *tinyLFU) write(en *entry) *entry {
 	return candidate
 }
 
-func (l *tinyLFU) access(en *entry) {
+func (l *tinyLFU[Key, Value]) access(en *entry[Key, Value]) {
 	l.increase(en.hash)
 	if en.listID == admissionWindow {
 		l.lru.access(en)
@@ -65,7 +65,7 @@ func (l *tinyLFU) access(en *entry) {
 	}
 }
 
-func (l *tinyLFU) remove(en *entry) *entry {
+func (l *tinyLFU[Key, Value]) remove(en *entry[Key, Value]) *entry[Key, Value] {
 	if en.listID == admissionWindow {
 		return l.lru.remove(en)
 	}
@@ -73,7 +73,7 @@ func (l *tinyLFU) remove(en *entry) *entry {
 }
 
 // increase adds the given hash to the filter and counter.
-func (l *tinyLFU) increase(h uint64) {
+func (l *tinyLFU[Key, Value]) increase(h uint64) {
 	if l.samples <= 0 {
 		return
 	}
@@ -89,7 +89,7 @@ func (l *tinyLFU) increase(h uint64) {
 }
 
 // estimate estimates frequency of the given hash value.
-func (l *tinyLFU) estimate(h uint64) uint8 {
+func (l *tinyLFU[Key, Value]) estimate(h uint64) uint8 {
 	freq := l.counter.estimate(h)
 	if l.filter.contains(h) {
 		freq++
@@ -98,7 +98,7 @@ func (l *tinyLFU) estimate(h uint64) uint8 {
 }
 
 // iterate walks through all lists by access time.
-func (l *tinyLFU) iterate(fn func(en *entry) bool) {
+func (l *tinyLFU[Key, Value]) iterate(fn func(en *entry[Key, Value]) bool) {
 	l.slru.iterate(fn)
 	l.lru.iterate(fn)
 }
